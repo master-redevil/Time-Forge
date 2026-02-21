@@ -1,26 +1,80 @@
-# imports
-from core.tracker import list_running_processes , active_process_name 
+# from datetime import datetime
+
+# from core.tracker import list_running_processes, active_process_name
+# from database.database_manager import DatabaseManager
+
+# db = DatabaseManager()
+
+#!/usr/bin/env python3
+from datetime import datetime
 from database.database_manager import DatabaseManager
-import time
 
-tracked_processes = ["chrome.exe", "firefox.exe", "edge.exe", "opera.exe", "brave.exe", "vivaldi.exe", "safari.exe", "explorer.exe", "notepad.exe", "cmd.exe", "powershell.exe", "python.exe", "java.exe", "node.exe", "code.exe", "discord.exe", "spotify.exe", "slack.exe", "teams.exe", "zoom.exe", "skype.exe", "outlook.exe", "word.exe", "excel.exe", "powerpoint.exe"]
+db = DatabaseManager()
 
-# Example usage:
-apps = list_running_processes()
+def print_apps():
+    apps = db.get_all_apps()
+    if not apps:
+        print("No tracked apps.")
+        return
+    print("Tracked applications:")
+    for app in apps:
+        print(
+            f"> Name: {app['process_name']}, Display Name: {app['display_name']}, "
+            f"Category: {app['category']}, Daily Limit: {app['daily_limit_seconds']} seconds"
+        )
 
-print(f"Current active process: {active_process_name}")
-    
-print("Running tracked applications:")
-for app in apps:
-    print(f"> Name: {app['Name']}, PID: {app['ProcessId']}")
-    
-    
-def test_database_integrity():
-    """Test if the database is working as expected"""
-    try:
-        db = DatabaseManager()
-        db.add_app("test_app")
-        db.remove_app("test_app")
-        print("Database integrity test passed")
-    except Exception as e:
-        print(f"Database integrity test failed: {e}")
+def print_logs(limit=10):
+    rows = db.conn.execute("""
+        SELECT l.id, a.process_name AS app_name, a.display_name, l.start_time, l.end_time, l.duration_seconds, l.log_date
+        FROM usage_logs l
+        JOIN tracked_apps a ON l.app_id = a.id
+        ORDER BY l.start_time DESC
+        LIMIT ?
+    """, (limit,)).fetchall()
+    print("Recent logs:")
+    if not rows:
+        print("  (no logs yet)")
+        return
+    for r in rows:
+        print(f"  {r['log_date']} | {r['app_name']} ({r['display_name']}) - {r['duration_seconds']}s | {r['start_time']} -> {r['end_time']}")
+
+def cli_loop():
+    print("Time Forge CLI. Type 'help' for commands.")
+    while True:
+        try:
+            cmd = input("timeforge> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not cmd:
+            continue
+        parts = cmd.split()
+        command = parts[0].lower()
+        if command in ("exit","quit"):
+            print("Exiting Time Forge CLI.")
+            break
+        if command == "help":
+            print("Commands: add | list | logs | lognow <process> | help | exit")
+            continue
+        if command == "add":
+            db.add_app()
+        elif command in ("list","ls"):
+            print_apps()
+        elif command == "logs":
+            print_logs(20)
+        elif command == "lognow":
+            if len(parts) >= 2:
+                proc = parts[1]
+                now = datetime.now()
+                db.log_usage(proc, now, now)
+            else:
+                print("Usage: lognow <process_name>")
+        else:
+            print("Unknown command. Type 'help' for options.")
+        print_logs(5)
+
+if __name__ == "__main__":
+    print("Launching Time Forge CLI...")
+    print_apps()
+    cli_loop()
+

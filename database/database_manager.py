@@ -67,14 +67,35 @@ class DatabaseManager:
     # App Management
     # -----------------------------------
 
-    def add_app(self, process_name, display_name=None,
-                category="neutral", daily_limit=0):
-        self.conn.execute("""
-            INSERT OR IGNORE INTO tracked_apps
-            (process_name, display_name, category, daily_limit_seconds)
-            VALUES (?, ?, ?, ?)
-        """, (process_name, display_name or process_name,
-              category, daily_limit))
+    def add_app(self):
+        try:
+            process_name = input("Enter the process name (e.g., chrome.exe): ").strip().lower()
+            if not process_name:
+                raise ValueError("Process name cannot be empty")
+            display_name = input("Enter a display name (optional): ").strip().lower() or process_name
+            category = input("Enter a category (Productive, Unproductive, Neutral): ").strip().lower()
+            if category not in ['productive', 'unproductive', 'neutral']:
+                raise ValueError("Invalid category. Must be one of Productive, Unproductive, Neutral")
+            set_daily_limit = input("Do you want to set a daily limit? (y/n): ").strip().lower()
+            # Default daily limit to 0 to ensure the variable always exists
+            daily_limit = 0
+            if set_daily_limit == 'y':
+                try:
+                    daily_limit = int(input("Enter the daily limit (in seconds): "))
+                    if daily_limit < 0:
+                        raise ValueError("Daily limit cannot be negative")
+                except ValueError:
+                    print("Invalid input for daily limit. Defaulting to 0.")
+                    daily_limit = 0
+            self.conn.execute("""
+                INSERT OR IGNORE INTO tracked_apps
+                (process_name, display_name, category, daily_limit_seconds)
+                VALUES (?, ?, ?, ?)
+            """, (process_name, display_name,
+                   category, daily_limit))
+        except sqlite3.Error as e:
+            print(f"Error adding app: {e}")
+            raise
 
     def remove_app(self, process_name):
         self.conn.execute("""
@@ -123,7 +144,7 @@ class DatabaseManager:
         log_date = start_time.date().isoformat()
 
         self.conn.execute("""
-            INSERT INTO usage_logs;
+            INSERT INTO usage_logs
             (app_id, start_time, end_time, duration_seconds, log_date)
             VALUES (?, ?, ?, ?, ?)
         """, (app['id'], start_time, end_time, duration, log_date))
