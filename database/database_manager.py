@@ -31,11 +31,14 @@ class DatabaseManager:
     def _create_tables(self):
         try:
             self.conn.executescript("""
+            DROP TABLE IF EXISTS usage_logs;
+            DROP TABLE IF EXISTS tracked_apps;
+            DROP TABLE IF EXISTS alerts;
             CREATE TABLE IF NOT EXISTS tracked_apps (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 process_name TEXT UNIQUE NOT NULL,
                 display_name TEXT,
-                category TEXT CHECK(category IN ('reproductive','unreproductive','neutral')) DEFAULT 'neutral',
+                category TEXT CHECK(category IN ('productive','unproductive','neutral')) DEFAULT 'neutral',
                 daily_limit_seconds INTEGER DEFAULT 0,
                 is_active INTEGER DEFAULT 1,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -88,11 +91,14 @@ class DatabaseManager:
                     print("Invalid input for daily limit. Defaulting to 0.")
                     daily_limit = 0
             self.conn.execute("""
-                INSERT OR IGNORE INTO tracked_apps
-                (process_name, display_name, category, daily_limit_seconds)
+                INSERT INTO tracked_apps (process_name, display_name, category, daily_limit_seconds)
                 VALUES (?, ?, ?, ?)
-            """, (process_name, display_name,
-                   category, daily_limit))
+                ON CONFLICT(process_name) DO UPDATE SET
+                    display_name=excluded.display_name,
+                    category=excluded.category,
+                    daily_limit_seconds=excluded.daily_limit_seconds,
+                    is_active=1
+            """, (process_name, display_name, category, daily_limit))
         except sqlite3.Error as e:
             print(f"Error adding app: {e}")
             raise
@@ -126,6 +132,13 @@ class DatabaseManager:
     def get_all_apps(self):
         return self.conn.execute("""
             SELECT * FROM tracked_apps
+            WHERE is_active = 1
+        """).fetchall()
+        
+    def list_tracked_apps(self):
+        return self.conn.execute("""
+            SELECT process_name, display_name, category, daily_limit_seconds
+            FROM tracked_apps
             WHERE is_active = 1
         """).fetchall()
 

@@ -69,6 +69,14 @@ def cli_loop():
                 db.log_usage(proc, now, now)
             else:
                 print("Usage: lognow <process_name>")
+        elif command == "list":
+            apps = db.list_tracked_apps()
+            if not apps:
+                print("No tracked apps.")
+            else:
+                print("Tracked applications:")
+                for app in apps:
+                    print(f"  {app['process_name']} ({app['display_name']}) - Category: {app['category']}, Daily Limit: {app['daily_limit_seconds']} seconds")
         else:
             print("Unknown command. Type 'help' for options.")
         print_logs(5)
