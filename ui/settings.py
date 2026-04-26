@@ -1,7 +1,8 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QListWidget, QPushButton, QMessageBox, QGroupBox
+    QListWidget, QListWidgetItem, QPushButton, QMessageBox, QGroupBox
 )
+from PySide6.QtCore import Qt
 import psutil
 import database
 
@@ -89,20 +90,32 @@ class SettingsWindow(QWidget):
         self.load_tracked_apps()
         self.load_running_processes()
 
+    def clean_name(self, name):
+        if name.lower().endswith('.exe'):
+            return name[:-4].title()
+        return name.title()
+
     def load_tracked_apps(self):
         self.tracked_list.clear()
         apps = database.get_tracked_apps()
         for app in apps:
-            self.tracked_list.addItem(app)
+            item = QListWidgetItem(self.clean_name(app))
+            item.setData(Qt.UserRole, app)
+            self.tracked_list.addItem(item)
 
     def load_running_processes(self):
         self.running_list.clear()
         running = set()
-        for proc in psutil.process_iter(['name']):
+        self.running_exes = {}
+        for proc in psutil.process_iter(['name', 'exe']):
             try:
-                name = proc.info['name']
+                name = proc.info.get('name')
+                exe = proc.info.get('exe')
                 if name:
-                    running.add(name.lower())
+                    name_lower = name.lower()
+                    running.add(name_lower)
+                    if exe and name_lower not in self.running_exes:
+                        self.running_exes[name_lower] = exe
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
         
@@ -110,14 +123,17 @@ class SettingsWindow(QWidget):
         # Filter out already tracked apps
         available = sorted(list(running - tracked))
         for app in available:
-            self.running_list.addItem(app)
+            item = QListWidgetItem(self.clean_name(app))
+            item.setData(Qt.UserRole, app)
+            self.running_list.addItem(item)
 
     def add_app(self):
         item = self.running_list.currentItem()
         if not item:
             return
-        app_name = item.text()
-        if database.add_tracked_app(app_name):
+        app_name = item.data(Qt.UserRole)
+        exe_path = getattr(self, 'running_exes', {}).get(app_name)
+        if database.add_tracked_app(app_name, exe_path):
             self.load_tracked_apps()
             self.load_running_processes()
 
@@ -125,7 +141,7 @@ class SettingsWindow(QWidget):
         item = self.tracked_list.currentItem()
         if not item:
             return
-        app_name = item.text()
+        app_name = item.data(Qt.UserRole)
         database.remove_tracked_app(app_name)
         self.load_tracked_apps()
         self.load_running_processes()

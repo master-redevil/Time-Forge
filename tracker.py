@@ -18,14 +18,21 @@ class TrackerDaemon(QThread):
             if not tracked_apps:
                 time.sleep(self.poll_interval)
                 continue
+                
+            app_paths = database.get_app_paths()
 
             # Gather names of all currently running processes
             running_apps = set()
-            for proc in psutil.process_iter(['name']):
+            for proc in psutil.process_iter(['name', 'exe']):
                 try:
-                    name = proc.info['name']
+                    name = proc.info.get('name')
+                    exe = proc.info.get('exe')
                     if name:
-                        running_apps.add(name.lower())
+                        name_lower = name.lower()
+                        running_apps.add(name_lower)
+                        if name_lower in tracked_apps and exe and name_lower not in app_paths:
+                            database.update_app_path(name_lower, exe)
+                            app_paths[name_lower] = exe
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     pass
 

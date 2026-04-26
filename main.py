@@ -18,6 +18,8 @@ class AppController(QObject):
 
         self.settings_window = SettingsWindow()
         self.dashboard_window = DashboardWindow()
+        
+        self.dashboard_window.btn_settings.clicked.connect(self.settings_window.show)
 
         # Start tracking daemon
         self.tracker = TrackerDaemon(poll_interval=5)
@@ -55,20 +57,16 @@ class AppController(QObject):
                 background-color: #313244;
             }
         """)
-        
-        action_dashboard = menu.addAction("Open Dashboard")
-        action_dashboard.triggered.connect(self.toggle_dashboard)
-        
-        action_settings = menu.addAction("Settings")
-        action_settings.triggered.connect(self.settings_window.show)
-        
-        menu.addSeparator()
-        
         action_quit = menu.addAction("Quit")
         action_quit.triggered.connect(self.quit_app)
-        
         self.tray_icon.setContextMenu(menu)
+
+        self.tray_icon.activated.connect(self.tray_activated)
         self.tray_icon.show()
+
+    def tray_activated(self, reason):
+        if reason == QSystemTrayIcon.Trigger or reason == QSystemTrayIcon.DoubleClick:
+            self.toggle_dashboard()
 
     @Slot()
     def toggle_dashboard(self):

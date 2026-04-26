@@ -1,13 +1,15 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QPushButton, QStackedWidget, QListWidget, QListWidgetItem
+    QPushButton, QStackedWidget, QListWidget, QListWidgetItem, QFileIconProvider, QStyle
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QFileInfo, Signal, QSize
 from PySide6.QtGui import QPainter, QColor, QFont
 from PySide6.QtCharts import (
-    QChart, QChartView, QPieSeries, QBarSeries, QBarSet, QBarCategoryAxis, QValueAxis
+    QChart, QChartView, QPieSeries, QBarSeries, QStackedBarSeries, QBarSet, QBarCategoryAxis, QValueAxis, QLegendMarker
 )
+from PySide6.QtGui import QBrush
 import database
+import os
 
 def format_time(seconds):
     hours = seconds // 3600
@@ -59,8 +61,8 @@ class DashboardWindow(QWidget):
                 font-size: 14px;
             }
             QListWidget::item {
-                padding: 8px;
                 border-bottom: 1px solid #313244;
+                margin: 4px;
             }
         """)
 
@@ -89,7 +91,20 @@ class DashboardWindow(QWidget):
         self.btn_pie = QPushButton("Pie Chart")
         self.btn_pie.setCheckable(True)
         
-        self.btn_close = QPushButton("X")
+        self.btn_settings = QPushButton("⚙ Settings")
+        
+        self.btn_min = QPushButton()
+        self.btn_min.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMinButton))
+        self.btn_min.setFixedSize(30, 30)
+        self.btn_min.clicked.connect(self.showMinimized)
+
+        self.btn_max = QPushButton()
+        self.btn_max.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMaxButton))
+        self.btn_max.setFixedSize(30, 30)
+        self.btn_max.clicked.connect(self.toggle_maximize)
+        
+        self.btn_close = QPushButton()
+        self.btn_close.setIcon(self.style().standardIcon(QStyle.SP_TitleBarCloseButton))
         self.btn_close.setFixedSize(30, 30)
         self.btn_close.clicked.connect(self.hide)
 
@@ -103,6 +118,9 @@ class DashboardWindow(QWidget):
         header_layout.addWidget(self.btn_text)
         header_layout.addWidget(self.btn_bar)
         header_layout.addWidget(self.btn_pie)
+        header_layout.addWidget(self.btn_settings)
+        header_layout.addWidget(self.btn_min)
+        header_layout.addWidget(self.btn_max)
         header_layout.addWidget(self.btn_close)
 
         # Stacked Widget for different views
@@ -114,7 +132,6 @@ class DashboardWindow(QWidget):
         # 2. Bar Chart View
         self.bar_chart = QChart()
         self.bar_chart.setBackgroundBrush(QColor(0, 0, 0, 0))
-        self.bar_chart.legend().hide()
         self.bar_view = QChartView(self.bar_chart)
         self.bar_view.setRenderHint(QPainter.Antialiasing)
         self.bar_view.setStyleSheet("background: transparent;")
@@ -135,6 +152,12 @@ class DashboardWindow(QWidget):
         container_layout.addWidget(self.stacked_widget)
         main_layout.addWidget(self.container)
 
+    def toggle_maximize(self):
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+
     def switch_view(self, index):
         self.btn_text.setChecked(index == 0)
         self.btn_bar.setChecked(index == 1)
@@ -152,27 +175,54 @@ class DashboardWindow(QWidget):
             self.text_view.addItem("No usage data recorded for today yet.")
             return
 
+        app_paths = database.get_app_paths()
+        icon_provider = QFileIconProvider()
+
+        def clean_name(name):
+            if name.lower().endswith('.exe'):
+                return name[:-4].title()
+            return name.title()
+
+        cleaned_data = [(app, clean_name(app), seconds) for app, seconds in sorted_data]
+
         # Update Text View
         self.text_view.clear()
-        for app, seconds in sorted_data:
-            item_text = f"{app}: {format_time(seconds)}"
-            self.text_view.addItem(item_text)
+        self.text_view.setIconSize(QSize(32, 32))
+        for app, friendly_name, seconds in cleaned_data:
+            item_text = f"{friendly_name}: {format_time(seconds)}"
+            item = QListWidgetItem(item_text)
+            
+            exe_path = app_paths.get(app)
+            if exe_path and os.path.exists(exe_path):
+                icon = icon_provider.icon(QFileInfo(exe_path))
+                item.setIcon(icon)
+                
+            self.text_view.addItem(item)
 
         # Update Bar Chart
         self.bar_chart.removeAllSeries()
         for ax in self.bar_chart.axes():
             self.bar_chart.removeAxis(ax)
             
-        bar_series = QBarSeries()
-        bar_set = QBarSet("Usage")
-        bar_set.setColor(QColor("#89b4fa"))
-        categories = []
+        bar_series = QStackedBarSeries()
+        self.bar_chart.legend().setVisible(True)
+        self.bar_chart.legend().setLabelColor(QColor("#cdd6f4"))
         
-        for app, seconds in sorted_data[:10]: # top 10
+        categories = [friendly_name for app, friendly_name, seconds in cleaned_data[:10]]
+        colors = ["#89b4fa", "#f38ba8", "#a6e3a1", "#f9e2af", "#cba6f7", "#89dceb", "#fab387", "#eba0ac", "#94e2d5", "#f5c2e7"]
+        
+        for i, (app, friendly_name, seconds) in enumerate(cleaned_data[:10]): # top 10
+            bar_set = QBarSet(friendly_name)
+            # Pad with zeroes so each bar is in its own category column
+            for _ in range(i):
+                bar_set.append(0)
             bar_set.append(seconds / 60) # in minutes
-            categories.append(app)
+            for _ in range(len(categories) - i - 1):
+                bar_set.append(0)
             
-        bar_series.append(bar_set)
+            bar_set.setColor(QColor(colors[i % len(colors)]))
+            bar_series.append(bar_set)
+            
         self.bar_chart.addSeries(bar_series)
         
         axis_x = QBarCategoryAxis()
@@ -188,17 +238,35 @@ class DashboardWindow(QWidget):
         self.bar_chart.addAxis(axis_y, Qt.AlignLeft)
         bar_series.attachAxis(axis_y)
 
+        # Set Icon Brushes for Bar Chart Legend
+        bar_markers = self.bar_chart.legend().markers()
+        for i, (app, friendly_name, seconds) in enumerate(cleaned_data[:10]):
+            exe_path = app_paths.get(app)
+            if exe_path and os.path.exists(exe_path):
+                icon = icon_provider.icon(QFileInfo(exe_path))
+                if not icon.isNull() and i < len(bar_markers):
+                    bar_markers[i].setBrush(QBrush(icon.pixmap(16, 16)))
+
         # Update Pie Chart
         self.pie_chart.removeAllSeries()
         pie_series = QPieSeries()
         colors = ["#89b4fa", "#f38ba8", "#a6e3a1", "#f9e2af", "#cba6f7"]
-        for i, (app, seconds) in enumerate(sorted_data[:5]): # Top 5 for pie
-            slice = pie_series.append(app, seconds)
+        for i, (app, friendly_name, seconds) in enumerate(cleaned_data[:5]): # Top 5 for pie
+            slice = pie_series.append(friendly_name, seconds)
             slice.setBrush(QColor(colors[i % len(colors)]))
             slice.setLabelVisible(True)
             slice.setLabelColor(QColor("#cdd6f4"))
             
         self.pie_chart.addSeries(pie_series)
+
+        # Set Icon Brushes for Pie Chart Legend
+        pie_markers = self.pie_chart.legend().markers()
+        for i, (app, friendly_name, seconds) in enumerate(cleaned_data[:5]):
+            exe_path = app_paths.get(app)
+            if exe_path and os.path.exists(exe_path):
+                icon = icon_provider.icon(QFileInfo(exe_path))
+                if not icon.isNull() and i < len(pie_markers):
+                    pie_markers[i].setBrush(QBrush(icon.pixmap(16, 16)))
 
     def refresh(self):
         self.load_data()

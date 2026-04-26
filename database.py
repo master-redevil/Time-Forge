@@ -17,6 +17,10 @@ def init_db():
             app_name TEXT UNIQUE NOT NULL
         )
     ''')
+    try:
+        cursor.execute('ALTER TABLE TrackedApps ADD COLUMN exe_path TEXT')
+    except sqlite3.OperationalError:
+        pass # Column might already exist
     # Table to store usage logs per day
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS UsageLogs (
@@ -38,17 +42,35 @@ def get_tracked_apps():
     conn.close()
     return apps
 
-def add_tracked_app(app_name):
+def add_tracked_app(app_name, exe_path=None):
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute('INSERT INTO TrackedApps (app_name) VALUES (?)', (app_name.lower(),))
+        if exe_path:
+            cursor.execute('INSERT INTO TrackedApps (app_name, exe_path) VALUES (?, ?)', (app_name.lower(), exe_path))
+        else:
+            cursor.execute('INSERT INTO TrackedApps (app_name) VALUES (?)', (app_name.lower(),))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
         return False
     finally:
         conn.close()
+
+def update_app_path(app_name, exe_path):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE TrackedApps SET exe_path = ? WHERE app_name = ?', (exe_path, app_name.lower()))
+    conn.commit()
+    conn.close()
+
+def get_app_paths():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT app_name, exe_path FROM TrackedApps WHERE exe_path IS NOT NULL')
+    paths = {row[0]: row[1] for row in cursor.fetchall()}
+    conn.close()
+    return paths
 
 def remove_tracked_app(app_name):
     conn = get_connection()
