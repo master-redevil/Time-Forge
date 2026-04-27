@@ -2,11 +2,13 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QListWidget, QListWidgetItem, QPushButton, QMessageBox, QGroupBox
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 import psutil
 import database
 
 class SettingsWindow(QWidget):
+    apps_changed = Signal()
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Time Forge - Settings")
@@ -136,6 +138,7 @@ class SettingsWindow(QWidget):
         if database.add_tracked_app(app_name, exe_path):
             self.load_tracked_apps()
             self.load_running_processes()
+            self.apps_changed.emit()
 
     def remove_app(self):
         item = self.tracked_list.currentItem()
@@ -145,3 +148,4 @@ class SettingsWindow(QWidget):
         database.remove_tracked_app(app_name)
         self.load_tracked_apps()
         self.load_running_processes()
+        self.apps_changed.emit()

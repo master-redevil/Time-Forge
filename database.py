@@ -31,6 +31,50 @@ def init_db():
             UNIQUE(app_name, log_date)
         )
     ''')
+    # Table to store individual usage sessions
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS Sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            app_name TEXT,
+            start_date DATETIME,
+            duration_seconds INTEGER DEFAULT 0,
+            is_active BOOLEAN DEFAULT 1
+        )
+    ''')
+    
+    # Migration: Ensure all columns exist (for older schemas)
+    cursor.execute("PRAGMA table_info(Sessions)")
+    columns = [row[1] for row in cursor.fetchall()]
+    
+    # If legacy column 'start_time' exists, it will cause IntegrityErrors.
+    # Since sessions are reset on app start anyway, we can safely drop and recreate.
+    if 'start_time' in columns:
+        cursor.execute('DROP TABLE Sessions')
+        # Re-run the creation
+        cursor.execute('''
+            CREATE TABLE Sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                app_name TEXT,
+                start_date DATETIME,
+                duration_seconds INTEGER DEFAULT 0,
+                is_active BOOLEAN DEFAULT 1
+            )
+        ''')
+        # Refresh column list for subsequent checks
+        cursor.execute("PRAGMA table_info(Sessions)")
+        columns = [row[1] for row in cursor.fetchall()]
+
+    if 'app_name' not in columns:
+        cursor.execute('ALTER TABLE Sessions ADD COLUMN app_name TEXT')
+    if 'start_date' not in columns:
+        cursor.execute('ALTER TABLE Sessions ADD COLUMN start_date DATETIME')
+    if 'duration_seconds' not in columns:
+        cursor.execute('ALTER TABLE Sessions ADD COLUMN duration_seconds INTEGER DEFAULT 0')
+    if 'is_active' not in columns:
+        cursor.execute('ALTER TABLE Sessions ADD COLUMN is_active BOOLEAN DEFAULT 1')
+
+    # Reset any dangling active sessions from previous crashes
+    cursor.execute('UPDATE Sessions SET is_active = 0 WHERE is_active = 1')
     conn.commit()
     conn.close()
 
@@ -75,8 +119,10 @@ def get_app_paths():
 def remove_tracked_app(app_name):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('DELETE FROM TrackedApps WHERE app_name = ?', (app_name.lower(),))
-    # Option: do not delete from UsageLogs to keep history
+    app_name = app_name.lower()
+    cursor.execute('DELETE FROM TrackedApps WHERE app_name = ?', (app_name,))
+    # End any active sessions for this app
+    cursor.execute('UPDATE Sessions SET is_active = 0 WHERE app_name = ? AND is_active = 1', (app_name,))
     conn.commit()
     conn.close()
 
@@ -104,6 +150,45 @@ def get_today_usage():
     cursor = conn.cursor()
     today = datetime.date.today().isoformat()
     cursor.execute('SELECT app_name, duration_seconds FROM UsageLogs WHERE log_date = ?', (today,))
+    data = {row[0]: row[1] for row in cursor.fetchall()}
+    conn.close()
+    return data
+
+def start_session(app_name):
+    conn = get_connection()
+    cursor = conn.cursor()
+    app_name = app_name.lower()
+    now = datetime.datetime.now().isoformat()
+    # End any existing active sessions for this app
+    cursor.execute('UPDATE Sessions SET is_active = 0 WHERE app_name = ? AND is_active = 1', (app_name,))
+    cursor.execute('INSERT INTO Sessions (app_name, start_date, duration_seconds, is_active) VALUES (?, ?, 0, 1)', (app_name, now))
+    conn.commit()
+    conn.close()
+
+def update_session(app_name, duration_seconds):
+    conn = get_connection()
+    cursor = conn.cursor()
+    app_name = app_name.lower()
+    cursor.execute('SELECT id, duration_seconds FROM Sessions WHERE app_name = ? AND is_active = 1 ORDER BY id DESC LIMIT 1', (app_name,))
+    row = cursor.fetchone()
+    if row:
+        new_duration = row[1] + duration_seconds
+        cursor.execute('UPDATE Sessions SET duration_seconds = ? WHERE id = ?', (new_duration, row[0]))
+    conn.commit()
+    conn.close()
+
+def end_session(app_name):
+    conn = get_connection()
+    cursor = conn.cursor()
+    app_name = app_name.lower()
+    cursor.execute('UPDATE Sessions SET is_active = 0 WHERE app_name = ? AND is_active = 1', (app_name,))
+    conn.commit()
+    conn.close()
+
+def get_active_sessions():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT app_name, MAX(duration_seconds) FROM Sessions WHERE is_active = 1 GROUP BY app_name')
     data = {row[0]: row[1] for row in cursor.fetchall()}
     conn.close()
     return data

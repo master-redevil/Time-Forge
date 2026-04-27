@@ -1,7 +1,23 @@
 import time
 import psutil
+import ctypes
+from ctypes import wintypes
 from PySide6.QtCore import QThread, Signal
 import database
+
+class LASTINPUTINFO(ctypes.Structure):
+    _fields_ = [
+        ('cbSize', wintypes.UINT),
+        ('dwTime', wintypes.DWORD),
+    ]
+
+def get_idle_time():
+    lii = LASTINPUTINFO()
+    lii.cbSize = ctypes.sizeof(LASTINPUTINFO)
+    if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
+        millis = ctypes.windll.kernel32.GetTickCount() - lii.dwTime
+        return millis / 1000.0
+    return 0.0
 
 class TrackerDaemon(QThread):
     # Signal emitted when database is updated, so the UI can refresh if open
@@ -11,6 +27,7 @@ class TrackerDaemon(QThread):
         super().__init__()
         self.poll_interval = poll_interval
         self.running = True
+        self.active_apps = set()
 
     def run(self):
         while self.running:
@@ -36,12 +53,27 @@ class TrackerDaemon(QThread):
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     pass
 
+            idle_time = get_idle_time()
+            is_idle = idle_time > 60
+
             # Log usage for tracked apps that are currently running
             updated_any = False
             for app in tracked_apps:
                 if app in running_apps:
-                    database.log_usage(app, self.poll_interval)
-                    updated_any = True
+                    if app not in self.active_apps:
+                        # New session started
+                        database.start_session(app)
+                        self.active_apps.add(app)
+                    
+                    if not is_idle:
+                        database.log_usage(app, self.poll_interval)
+                        database.update_session(app, self.poll_interval)
+                        updated_any = True
+                else:
+                    if app in self.active_apps:
+                        # Session ended
+                        database.end_session(app)
+                        self.active_apps.remove(app)
             
             if updated_any:
                 self.updated.emit()

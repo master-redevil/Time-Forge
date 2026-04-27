@@ -167,8 +167,11 @@ class DashboardWindow(QWidget):
 
     def load_data(self):
         data = database.get_today_usage()
+        tracked_apps = set(database.get_tracked_apps())
+        # Filter only currently tracked apps
+        filtered_data = {k: v for k, v in data.items() if k in tracked_apps}
         # Sort by duration descending
-        sorted_data = sorted(data.items(), key=lambda x: x[1], reverse=True)
+        sorted_data = sorted(filtered_data.items(), key=lambda x: x[1], reverse=True)
         
         if not sorted_data:
             self.text_view.clear()
@@ -177,6 +180,8 @@ class DashboardWindow(QWidget):
 
         app_paths = database.get_app_paths()
         icon_provider = QFileIconProvider()
+        
+        active_sessions = database.get_active_sessions()
 
         def clean_name(name):
             if name.lower().endswith('.exe'):
@@ -189,7 +194,11 @@ class DashboardWindow(QWidget):
         self.text_view.clear()
         self.text_view.setIconSize(QSize(32, 32))
         for app, friendly_name, seconds in cleaned_data:
-            item_text = f"{friendly_name}: {format_time(seconds)}"
+            if app in active_sessions:
+                session_seconds = active_sessions[app]
+                item_text = f"{friendly_name} | Total: {format_time(seconds)} | Session: {format_time(session_seconds)}"
+            else:
+                item_text = f"{friendly_name} | Total: {format_time(seconds)}"
             item = QListWidgetItem(item_text)
             
             exe_path = app_paths.get(app)

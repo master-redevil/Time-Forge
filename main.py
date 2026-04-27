@@ -2,7 +2,7 @@ import sys
 import keyboard
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PySide6.QtGui import QIcon, QPixmap, QColor, QPainter
-from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtCore import QObject, Signal, Slot, Qt
 
 import database
 from tracker import TrackerDaemon
@@ -20,6 +20,7 @@ class AppController(QObject):
         self.dashboard_window = DashboardWindow()
         
         self.dashboard_window.btn_settings.clicked.connect(self.settings_window.show)
+        self.settings_window.apps_changed.connect(self.dashboard_window.refresh)
 
         # Start tracking daemon
         self.tracker = TrackerDaemon(poll_interval=5)
@@ -38,7 +39,7 @@ class AppController(QObject):
         pixmap.fill(QColor("transparent"))
         painter = QPainter(pixmap)
         painter.setBrush(QColor("#89b4fa"))
-        painter.setPen(Qt.NoPen if hasattr(Qt, 'NoPen') else QColor("transparent"))
+        painter.setPen(Qt.NoPen)
         painter.drawEllipse(4, 4, 56, 56)
         painter.end()
         icon = QIcon(pixmap)
@@ -85,8 +86,7 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False) # Keep running in tray
     
-    # Import Qt here for the programmatic icon workaround above
-    from PySide6.QtCore import Qt
+    
     
     controller = AppController()
     sys.exit(app.exec())
