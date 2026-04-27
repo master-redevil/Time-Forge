@@ -12,6 +12,7 @@ class SettingsWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Time Forge - Settings")
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
         self.resize(600, 500)
         
         # Apply dark mode style for premium look

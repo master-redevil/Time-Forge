@@ -19,7 +19,7 @@ class AppController(QObject):
         self.settings_window = SettingsWindow()
         self.dashboard_window = DashboardWindow()
         
-        self.dashboard_window.btn_settings.clicked.connect(self.settings_window.show)
+        self.dashboard_window.btn_settings.clicked.connect(self.show_settings)
         self.settings_window.apps_changed.connect(self.dashboard_window.refresh)
 
         # Start tracking daemon
@@ -77,6 +77,12 @@ class AppController(QObject):
             self.dashboard_window.refresh()
             self.dashboard_window.show()
             self.dashboard_window.activateWindow()
+
+    @Slot()
+    def show_settings(self):
+        self.settings_window.show()
+        self.settings_window.raise_()
+        self.settings_window.activateWindow()
 
     def quit_app(self):
         self.tracker.stop()
