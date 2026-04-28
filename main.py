@@ -25,6 +25,7 @@ class AppController(QObject):
         # Start tracking daemon
         self.tracker = TrackerDaemon(poll_interval=5)
         self.tracker.updated.connect(self.dashboard_window.refresh)
+        self.tracker.idle_status_changed.connect(self.dashboard_window.update_idle_status)
         self.tracker.start()
 
         self.setup_tray()

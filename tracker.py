@@ -22,12 +22,14 @@ def get_idle_time():
 class TrackerDaemon(QThread):
     # Signal emitted when database is updated, so the UI can refresh if open
     updated = Signal()
+    idle_status_changed = Signal(bool)
 
     def __init__(self, poll_interval=5):
         super().__init__()
         self.poll_interval = poll_interval
         self.running = True
         self.active_apps = set()
+        self.last_idle_state = None
 
     def run(self):
         while self.running:
@@ -55,6 +57,10 @@ class TrackerDaemon(QThread):
 
             idle_time = get_idle_time()
             is_idle = idle_time > 60
+
+            if is_idle != self.last_idle_state:
+                self.idle_status_changed.emit(is_idle)
+                self.last_idle_state = is_idle
 
             # Log usage for tracked apps that are currently running
             updated_any = False

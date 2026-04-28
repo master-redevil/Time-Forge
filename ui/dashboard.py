@@ -64,6 +64,23 @@ class DashboardWindow(QWidget):
                 border-bottom: 1px solid #313244;
                 margin: 4px;
             }
+            QLabel#StatusPill {
+                padding: 2px 10px;
+                border-radius: 10px;
+                font-size: 11px;
+                font-weight: bold;
+                text-transform: uppercase;
+            }
+            QLabel.Active {
+                background-color: rgba(166, 227, 161, 40);
+                color: #a6e3a1;
+                border: 1px solid #a6e3a1;
+            }
+            QLabel.Idle {
+                background-color: rgba(249, 226, 175, 40);
+                color: #f9e2af;
+                border: 1px solid #f9e2af;
+            }
         """)
 
         self.setup_ui()
@@ -81,6 +98,11 @@ class DashboardWindow(QWidget):
         header_layout = QHBoxLayout()
         title = QLabel("Time Forge Dashboard")
         title.setObjectName("Title")
+
+        self.idle_indicator = QLabel("ACTIVE")
+        self.idle_indicator.setObjectName("StatusPill")
+        self.idle_indicator.setProperty("class", "Active")
+        self.idle_indicator.setToolTip("Activity Status")
         
         # View Toggles
         self.btn_text = QPushButton("Plain Text")
@@ -114,6 +136,7 @@ class DashboardWindow(QWidget):
         self.btn_pie.clicked.connect(lambda: self.switch_view(2))
 
         header_layout.addWidget(title)
+        header_layout.addWidget(self.idle_indicator)
         header_layout.addStretch()
         header_layout.addWidget(self.btn_text)
         header_layout.addWidget(self.btn_bar)
@@ -279,3 +302,15 @@ class DashboardWindow(QWidget):
 
     def refresh(self):
         self.load_data()
+
+    def update_idle_status(self, is_idle):
+        if is_idle:
+            self.idle_indicator.setText("IDLE")
+            self.idle_indicator.setProperty("class", "Idle")
+        else:
+            self.idle_indicator.setText("ACTIVE")
+            self.idle_indicator.setProperty("class", "Active")
+        
+        # Force stylesheet refresh
+        self.idle_indicator.style().unpolish(self.idle_indicator)
+        self.idle_indicator.style().polish(self.idle_indicator)
