@@ -19,12 +19,22 @@ def get_idle_time():
         return millis / 1000.0
     return 0.0
 
+def get_foreground_app():
+    hwnd = ctypes.windll.user32.GetForegroundWindow()
+    pid = wintypes.DWORD()
+    ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    try:
+        proc = psutil.Process(pid.value)
+        return proc.name().lower()
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return None
+
 class TrackerDaemon(QThread):
     # Signal emitted when database is updated, so the UI can refresh if open
     updated = Signal()
     idle_status_changed = Signal(bool)
 
-    def __init__(self, poll_interval=5):
+    def __init__(self, poll_interval=1):
         super().__init__()
         self.poll_interval = poll_interval
         self.running = True
@@ -32,52 +42,63 @@ class TrackerDaemon(QThread):
         self.last_idle_state = None
 
     def run(self):
+        last_process_scan = 0
+        running_apps = set()
+        
         while self.running:
+            now = time.time()
             tracked_apps = set(database.get_tracked_apps())
+            
             if not tracked_apps:
                 time.sleep(self.poll_interval)
                 continue
-                
-            app_paths = database.get_app_paths()
-
-            # Gather names of all currently running processes
-            running_apps = set()
-            for proc in psutil.process_iter(['name', 'exe']):
-                try:
-                    name = proc.info.get('name')
-                    exe = proc.info.get('exe')
-                    if name:
-                        name_lower = name.lower()
-                        running_apps.add(name_lower)
-                        if name_lower in tracked_apps and exe and name_lower not in app_paths:
-                            database.update_app_path(name_lower, exe)
-                            app_paths[name_lower] = exe
-                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                    pass
+            
+            # Throttle process scanning to every 3 seconds to save CPU
+            if now - last_process_scan > 3:
+                app_paths = database.get_app_paths()
+                running_apps = set()
+                for proc in psutil.process_iter(['name', 'exe']):
+                    try:
+                        name = proc.info.get('name')
+                        exe = proc.info.get('exe')
+                        if name:
+                            name_lower = name.lower()
+                            running_apps.add(name_lower)
+                            if name_lower in tracked_apps and exe and name_lower not in app_paths:
+                                database.update_app_path(name_lower, exe)
+                                app_paths[name_lower] = exe
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        pass
+                last_process_scan = now
 
             idle_time = get_idle_time()
             is_idle = idle_time > 60
+            focused_app = get_foreground_app()
 
             if is_idle != self.last_idle_state:
                 self.idle_status_changed.emit(is_idle)
                 self.last_idle_state = is_idle
 
-            # Log usage for tracked apps that are currently running
+            if not is_idle:
+                database.log_device_activity(self.poll_interval)
+
+            # Log usage only for the FOCUSED app if it's tracked
             updated_any = False
+            
+            # Manage sessions for all running tracked apps
             for app in tracked_apps:
                 if app in running_apps:
                     if app not in self.active_apps:
-                        # New session started
                         database.start_session(app)
                         self.active_apps.add(app)
                     
-                    if not is_idle:
+                    # Only log usage/update session if it is the FOCUSED app and NOT IDLE
+                    if app == focused_app and not is_idle:
                         database.log_usage(app, self.poll_interval)
                         database.update_session(app, self.poll_interval)
                         updated_any = True
                 else:
                     if app in self.active_apps:
-                        # Session ended
                         database.end_session(app)
                         self.active_apps.remove(app)
             

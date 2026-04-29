@@ -6,7 +6,6 @@ from PySide6.QtCore import QObject, Signal, Slot, Qt
 
 import database
 from tracker import TrackerDaemon
-from ui.settings import SettingsWindow
 from ui.dashboard import DashboardWindow
 
 class AppController(QObject):
@@ -16,14 +15,13 @@ class AppController(QObject):
         super().__init__()
         database.init_db()
 
-        self.settings_window = SettingsWindow()
         self.dashboard_window = DashboardWindow()
         
-        self.dashboard_window.btn_settings.clicked.connect(self.show_settings)
-        self.settings_window.apps_changed.connect(self.dashboard_window.refresh)
+        # Connect integrated settings signal
+        self.dashboard_window.settings_view.apps_changed.connect(self.dashboard_window.refresh)
 
         # Start tracking daemon
-        self.tracker = TrackerDaemon(poll_interval=5)
+        self.tracker = TrackerDaemon(poll_interval=1)
         self.tracker.updated.connect(self.dashboard_window.refresh)
         self.tracker.idle_status_changed.connect(self.dashboard_window.update_idle_status)
         self.tracker.start()
@@ -59,6 +57,12 @@ class AppController(QObject):
                 background-color: #313244;
             }
         """)
+        
+        action_show = menu.addAction("Show Dashboard")
+        action_show.triggered.connect(self.toggle_dashboard)
+        
+        menu.addSeparator()
+        
         action_quit = menu.addAction("Quit")
         action_quit.triggered.connect(self.quit_app)
         self.tray_icon.setContextMenu(menu)
@@ -79,12 +83,6 @@ class AppController(QObject):
             self.dashboard_window.show()
             self.dashboard_window.activateWindow()
 
-    @Slot()
-    def show_settings(self):
-        self.settings_window.show()
-        self.settings_window.raise_()
-        self.settings_window.activateWindow()
-
     def quit_app(self):
         self.tracker.stop()
         QApplication.quit()
@@ -92,8 +90,6 @@ class AppController(QObject):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False) # Keep running in tray
-    
-    
     
     controller = AppController()
     sys.exit(app.exec())

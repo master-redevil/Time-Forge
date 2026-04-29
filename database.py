@@ -41,6 +41,14 @@ def init_db():
             is_active BOOLEAN DEFAULT 1
         )
     ''')
+    # Table to store total device active time (not idle)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS DeviceActivity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            log_date DATE UNIQUE NOT NULL,
+            duration_seconds INTEGER DEFAULT 0
+        )
+    ''')
     
     # Migration: Ensure all columns exist (for older schemas)
     cursor.execute("PRAGMA table_info(Sessions)")
@@ -192,3 +200,24 @@ def get_active_sessions():
     data = {row[0]: row[1] for row in cursor.fetchall()}
     conn.close()
     return data
+
+def log_device_activity(duration_seconds):
+    conn = get_connection()
+    cursor = conn.cursor()
+    today = datetime.date.today().isoformat()
+    cursor.execute('''
+        INSERT INTO DeviceActivity (log_date, duration_seconds) 
+        VALUES (?, ?) 
+        ON CONFLICT(log_date) DO UPDATE SET duration_seconds = duration_seconds + excluded.duration_seconds
+    ''', (today, duration_seconds))
+    conn.commit()
+    conn.close()
+
+def get_today_device_activity():
+    conn = get_connection()
+    cursor = conn.cursor()
+    today = datetime.date.today().isoformat()
+    cursor.execute('SELECT duration_seconds FROM DeviceActivity WHERE log_date = ?', (today,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else 0
