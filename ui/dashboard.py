@@ -1,10 +1,11 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QStackedWidget, QListWidget, QListWidgetItem, QFileIconProvider, QStyle,
-    QFrame, QGridLayout, QScrollArea, QGroupBox
+    QFrame, QGridLayout, QScrollArea, QGroupBox, QGraphicsDropShadowEffect, QGraphicsColorizeEffect,
+    QGraphicsOpacityEffect
 )
 from PySide6.QtCore import Qt, QTimer, QFileInfo, Signal, QSize, QPropertyAnimation, QEasingCurve, QRect
-from PySide6.QtGui import QPainter, QColor, QFont, QIcon, QPixmap, QBrush, QPainterPath
+from PySide6.QtGui import QPainter, QColor, QFont, QIcon, QPixmap, QBrush, QPainterPath, QLinearGradient, QPen
 from PySide6.QtCharts import (
     QChart, QChartView, QPieSeries, QBarSeries, QStackedBarSeries, QBarSet, QBarCategoryAxis, QValueAxis
 )
@@ -14,6 +15,71 @@ import psutil
 import ctypes
 from ctypes import wintypes
 import datetime
+from PySide6.QtCore import Property
+
+class WindowButton(QPushButton):
+    def __init__(self, icon_type, hover_color, parent=None):
+        super().__init__(parent)
+        self.icon_type = icon_type # 'min' or 'close'
+        self.hover_color = QColor(hover_color)
+        self.setFixedSize(32, 32)
+        self.setCursor(Qt.PointingHandCursor)
+        
+        # Hover animation properties
+        self._bg_opacity = 0
+        self.anim = QPropertyAnimation(self, b"bg_opacity")
+        self.anim.setDuration(200)
+        self.anim.setEasingCurve(QEasingCurve.OutCubic)
+        self.anim.setStartValue(0.0)
+        self.anim.setEndValue(1.0)
+
+    @Property(float)
+    def bg_opacity(self): return self._bg_opacity
+    @bg_opacity.setter
+    def bg_opacity(self, v):
+        self._bg_opacity = v
+        self.update()
+
+    def enterEvent(self, event):
+        self.anim.setDirection(QPropertyAnimation.Forward)
+        if self.anim.state() == QPropertyAnimation.Stopped:
+            self.anim.start()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.anim.setDirection(QPropertyAnimation.Backward)
+        if self.anim.state() == QPropertyAnimation.Stopped:
+            self.anim.start()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Draw background
+        if self._bg_opacity > 0:
+            color = QColor(self.hover_color)
+            color.setAlphaF(self._bg_opacity * 0.15)
+            painter.setBrush(color)
+            painter.setPen(Qt.NoPen)
+            painter.drawRoundedRect(self.rect(), 16, 16)
+
+        # Draw Icon
+        icon_color = QColor("#64748B")
+        if self._bg_opacity > 0:
+            # Blend towards the hover color
+            icon_color = self.hover_color
+            
+        painter.setPen(QPen(icon_color, 2, Qt.SolidLine, Qt.RoundCap))
+        
+        cx, cy = self.width() // 2, self.height() // 2
+        s = 5 # half size
+        
+        if self.icon_type == 'min':
+            painter.drawLine(cx - s, cy, cx + s, cy)
+        else: # close
+            painter.drawLine(cx - s, cy - s, cx + s, cy + s)
+            painter.drawLine(cx - s, cy + s, cx + s, cy - s)
 
 def get_foreground_app():
     hwnd = ctypes.windll.user32.GetForegroundWindow()
@@ -34,99 +100,130 @@ def format_time(seconds):
     return f"{minutes:02}:{secs:02}"
 
 class SidebarButton(QPushButton):
-    def __init__(self, text, icon_name=None):
-        super().__init__(text)
+    def __init__(self, text, icon_path=None, parent=None):
+        super().__init__(parent)
         self.setCheckable(True)
         self.setFixedHeight(45)
         self.setCursor(Qt.PointingHandCursor)
-        if icon_name:
-            # Placeholder for icons, using standard icons for now
-            pass
-
-class Sidebar(QFrame):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedWidth(210)
-        self.setObjectName("Sidebar")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 20, 10, 20)
-        layout.setSpacing(10)
-
-        self.logo = QLabel("TIME FORGE")
-        self.logo.setObjectName("SidebarLogo")
-        self.logo.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.logo)
-        layout.addSpacing(20)
-
-        self.btn_home = SidebarButton(" Dashboard")
-        self.btn_stats = SidebarButton(" Statistics")
-        self.btn_apps = SidebarButton(" Tracked Apps")
-        self.btn_settings = SidebarButton(" Settings")
-
-        self.buttons = [self.btn_home, self.btn_stats, self.btn_apps, self.btn_settings]
-        for btn in self.buttons:
-            layout.addWidget(btn)
         
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(15, 0, 10, 0)
+        layout.setSpacing(12)
+        
+        if icon_path and os.path.exists(icon_path):
+            self.icon_label = QLabel()
+            self.icon_label.setFixedSize(24, 24)
+            self.icon_label.setAlignment(Qt.AlignCenter)
+            
+            # Render SVG at high resolution and scale down for maximum sharpness
+            icon = QIcon(icon_path)
+            # Use 64x64 for even better interpolation quality
+            pixmap = icon.pixmap(64, 64)
+            self.icon_label.setPixmap(pixmap.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            self.icon_label.setStyleSheet("background: transparent; border: none;")
+            
+            # Apply white colorize effect to icons
+            color_effect = QGraphicsColorizeEffect()
+            color_effect.setColor(QColor("#FFFFFF"))
+            color_effect.setStrength(1.0)
+            self.icon_label.setGraphicsEffect(color_effect)
+            
+            layout.addWidget(self.icon_label)
+        
+        self.text_label = QLabel(text)
+        self.text_label.setStyleSheet("background: transparent; color: white; font-weight: 600; font-size: 15px;")
+        layout.addWidget(self.text_label)
         layout.addStretch()
-        
+
 class StatusCard(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("StatusCard")
-        self.setFixedHeight(75) # Increased height for larger text
+        self.setMinimumHeight(75)
+        
+        # Consistent background gradient
         self.setStyleSheet("""
             QFrame#StatusCard {
-                background-color: #1e1e2e;
-                border: 1px solid #313244;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #1E2430, stop:1 #161B22);
+                border: 1px solid rgba(255, 255, 255, 5);
                 border-radius: 12px;
             }
-            QLabel#StatusTitle {
-                color: #a6e3a1;
-                font-size: 15px;
-                font-weight: bold;
-            }
-            QLabel#StatusSub {
-                color: #7f849c;
-                font-size: 13px;
-            }
         """)
-        
+
         layout = QGridLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setHorizontalSpacing(8)
+        layout.setContentsMargins(15, 12, 12, 12)
+        layout.setHorizontalSpacing(10)
         layout.setVerticalSpacing(2)
 
+        # Left accent bar (consistent with SummaryCard)
+        self.accent_bar = QFrame(self)
+        self.accent_bar.setFixedWidth(3)
+        self.accent_bar.setStyleSheet("background-color: #a6e3a1; border-radius: 1.5px;")
+        
+        # Pulsing status dot
+        self.dot_container = QWidget()
+        self.dot_container.setFixedSize(14, 14)
+        dot_layout = QVBoxLayout(self.dot_container)
+        dot_layout.setContentsMargins(0,0,0,0)
+        
         self.dot = QFrame()
         self.dot.setFixedSize(10, 10)
         self.dot.setStyleSheet("background-color: #a6e3a1; border-radius: 5px;")
+        dot_layout.addWidget(self.dot, 0, Qt.AlignCenter)
+
+        # Pulse effect
+        self.pulse_effect = QGraphicsOpacityEffect(self.dot)
+        self.dot.setGraphicsEffect(self.pulse_effect)
         
+        self.pulse_anim = QPropertyAnimation(self.pulse_effect, b"opacity")
+        self.pulse_anim.setDuration(1200)
+        self.pulse_anim.setStartValue(0.4)
+        self.pulse_anim.setEndValue(1.0)
+        self.pulse_anim.setEasingCurve(QEasingCurve.InOutQuad)
+        self.pulse_anim.setLoopCount(-1) # Infinite
+        self.pulse_anim.start()
+
         self.title = QLabel("Tracking Active")
-        self.title.setObjectName("StatusTitle")
+        self.title.setStyleSheet("color: #a6e3a1; font-size: 14px; font-weight: 800; background: transparent;")
         
         self.subtitle = QLabel("Started at --:--")
-        self.subtitle.setObjectName("StatusSub")
+        self.subtitle.setStyleSheet("color: #94A3B8; font-size: 12px; background: transparent;")
         
-        layout.addWidget(self.dot, 0, 0)
+        layout.addWidget(self.dot_container, 0, 0)
         layout.addWidget(self.title, 0, 1)
         layout.addWidget(self.subtitle, 1, 1)
         layout.setColumnStretch(1, 1)
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Position accent bar
+        bar_h = int(self.height() * 0.5)
+        self.accent_bar.setFixedHeight(bar_h)
+        self.accent_bar.move(0, (self.height() - bar_h) // 2)
+
     def set_active(self, is_active, start_time="--:--"):
+        color = "#a6e3a1" if is_active else "#f9e2af"
+        self.dot.setStyleSheet(f"background-color: {color}; border-radius: 5px;")
+        self.accent_bar.setStyleSheet(f"background-color: {color}; border-radius: 1.5px;")
+        
         if is_active:
-            self.dot.setStyleSheet("background-color: #a6e3a1; border-radius: 5px;")
             self.title.setText("Tracking Active")
-            self.title.setStyleSheet("color: #a6e3a1; font-weight: bold;")
+            self.title.setStyleSheet(f"color: {color}; font-size: 14px; font-weight: 800; background: transparent;")
             self.subtitle.setText(f"Started at {start_time}")
+            if self.pulse_anim.state() == QPropertyAnimation.Stopped:
+                self.pulse_anim.start()
         else:
-            self.dot.setStyleSheet("background-color: #f9e2af; border-radius: 5px;")
             self.title.setText("Tracking Paused")
-            self.title.setStyleSheet("color: #f9e2af; font-weight: bold;")
+            self.title.setStyleSheet(f"color: {color}; font-size: 14px; font-weight: 800; background: transparent;")
             self.subtitle.setText("System Idle")
+            self.pulse_anim.stop()
+            self.pulse_effect.setOpacity(1.0)
 
 class Sidebar(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(210)
+        self.setFixedWidth(230)
         self.setObjectName("Sidebar")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 20, 10, 20)
@@ -135,13 +232,24 @@ class Sidebar(QFrame):
         self.logo = QLabel("TIME FORGE")
         self.logo.setObjectName("SidebarLogo")
         self.logo.setAlignment(Qt.AlignCenter)
+        
+        # Native Electric Indigo glow
+        glow = QGraphicsDropShadowEffect()
+        glow.setBlurRadius(15)
+        glow.setColor(QColor("#6366F1"))
+        glow.setOffset(0, 0)
+        self.logo.setGraphicsEffect(glow)
+        
         layout.addWidget(self.logo)
         layout.addSpacing(20)
 
-        self.btn_home = SidebarButton(" Dashboard")
-        self.btn_stats = SidebarButton(" Statistics")
-        self.btn_apps = SidebarButton(" Tracked Apps")
-        self.btn_settings = SidebarButton(" Settings")
+        # Paths to icons
+        base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "icons")
+        
+        self.btn_home = SidebarButton("Dashboard", os.path.join(base_path, "home.svg"))
+        self.btn_stats = SidebarButton("Analytics", os.path.join(base_path, "analytics.svg"))
+        self.btn_apps = SidebarButton("Tracked Apps", os.path.join(base_path, "apps.svg"))
+        self.btn_settings = SidebarButton("Settings", os.path.join(base_path, "settings.svg"))
 
         self.buttons = [self.btn_home, self.btn_stats, self.btn_apps, self.btn_settings]
         for btn in self.buttons:
@@ -149,7 +257,15 @@ class Sidebar(QFrame):
         
         layout.addStretch()
         
-        # New Status Card
+        # Subtle divider line
+        divider = QFrame()
+        divider.setFrameShape(QFrame.HLine)
+        divider.setFixedHeight(1)
+        divider.setStyleSheet("background-color: #1E2430; border: none;")
+        layout.addWidget(divider)
+        layout.addSpacing(8)
+        
+        # Status Card
         self.status_card = StatusCard()
         layout.addWidget(self.status_card)
 
@@ -158,34 +274,112 @@ class Sidebar(QFrame):
             btn.setChecked(i == index)
 
 class SummaryCard(QFrame):
-    def __init__(self, title, value, color="#89b4fa"):
+    def __init__(self, title, value, accent="#89b4fa", grad_start="#151C2B", grad_end="#111827", icon_path=None):
         super().__init__()
-        self.setObjectName("SummaryCard")
+        self.accent = QColor(accent)
+        self.setMinimumHeight(110)
+        self.setCursor(Qt.PointingHandCursor)
+
+        # Main card styling (no border-left here)
         self.setStyleSheet(f"""
-            QFrame#SummaryCard {{
-                background-color: #313244;
+            SummaryCard {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 {grad_start}, stop:1 {grad_end});
                 border-radius: 12px;
-                padding: 15px;
-            }}
-            QLabel#CardTitle {{
-                color: #bac2de;
-                font-size: 12px;
-                text-transform: uppercase;
-                font-weight: bold;
-            }}
-            QLabel#CardValue {{
-                color: {color};
-                font-size: 24px;
-                font-weight: bold;
+                border: none;
             }}
         """)
+
+        # Softened accent bar as a child widget for rounded ends
+        self.accent_bar = QFrame(self)
+        ac = QColor(accent)
+        bar_color = f"rgba({ac.red()},{ac.green()},{ac.blue()},0.8)"
+        self.accent_bar.setStyleSheet(f"""
+            background-color: {bar_color};
+            border-radius: 1.5px;
+        """)
+        self.accent_bar.setFixedWidth(3)
+        # Position it vertically centered in resizeEvent or just set height here
+        self.accent_bar.move(0, 20)
+        self.accent_bar.setFixedHeight(70)
+
+        # Hover glow effect
+        self._glow = QGraphicsDropShadowEffect(self)
+        self._glow.setBlurRadius(0)
+        self._glow.setColor(self.accent)
+        self._glow.setOffset(0, 2)
+        self.setGraphicsEffect(self._glow)
+
+        self._glow_anim = QPropertyAnimation(self._glow, b"blurRadius")
+        self._glow_anim.setDuration(200)
+        self._glow_anim.setEasingCurve(QEasingCurve.OutCubic)
+
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 14, 15, 14) # Increased left margin to clear the bar
+        layout.setSpacing(0)
+
+        # Top row: title + icon
+        top_row = QHBoxLayout()
         self.title_label = QLabel(title)
-        self.title_label.setObjectName("CardTitle")
+        self.title_label.setStyleSheet(
+            f"color: {accent}; font-size: 11px; text-transform: uppercase; "
+            "font-weight: bold; letter-spacing: 1px; background: transparent;"
+        )
+        top_row.addWidget(self.title_label)
+        top_row.addStretch()
+
+        if icon_path and os.path.exists(icon_path):
+            icon_lbl = QLabel()
+            icon_lbl.setFixedSize(20, 20)
+            icon_lbl.setAlignment(Qt.AlignCenter)
+            # Tint icon to semi-transparent white for a subtle decorative look
+            source_pixmap = QIcon(icon_path).pixmap(40, 40)
+            tinted = QPixmap(source_pixmap.size())
+            tinted.fill(Qt.transparent)
+            p = QPainter(tinted)
+            p.drawPixmap(0, 0, source_pixmap)
+            p.setCompositionMode(QPainter.CompositionMode_SourceIn)
+            p.fillRect(tinted.rect(), QColor(255, 255, 255, 80))
+            p.end()
+            icon_lbl.setPixmap(tinted.scaled(20, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            icon_lbl.setStyleSheet("background: transparent;")
+            top_row.addWidget(icon_lbl)
+
+        layout.addLayout(top_row)
+
+        # Subtle separator
+        sep = QFrame()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet("background-color: rgba(255,255,255,8); border: none; margin: 6px 0px;")
+        layout.addWidget(sep)
+
         self.value_label = QLabel(value)
-        self.value_label.setObjectName("CardValue")
-        layout.addWidget(self.title_label)
+        self.value_label.setStyleSheet(
+            "color: #F1F5F9; font-size: 28px; font-weight: bold; background: transparent;"
+        )
         layout.addWidget(self.value_label)
+        layout.addStretch()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Keep the accent bar centered vertically and pinned to the left
+        bar_height = int(self.height() * 0.6)
+        self.accent_bar.setFixedHeight(bar_height)
+        self.accent_bar.move(0, (self.height() - bar_height) // 2)
+
+    def enterEvent(self, event):
+        self._glow_anim.stop()
+        self._glow_anim.setStartValue(self._glow.blurRadius())
+        self._glow_anim.setEndValue(25)
+        self._glow_anim.start()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._glow_anim.stop()
+        self._glow_anim.setStartValue(self._glow.blurRadius())
+        self._glow_anim.setEndValue(0)
+        self._glow_anim.start()
+        super().leaveEvent(event)
 
 class SummaryView(QWidget):
     def __init__(self):
@@ -200,10 +394,24 @@ class SummaryView(QWidget):
         layout.addWidget(header)
 
         # Cards
+        base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "icons")
         cards_layout = QHBoxLayout()
-        self.total_usage_card = SummaryCard("Total Usage", "00:00:00")
-        self.top_app_card = SummaryCard("Most Used App", "None", "#f38ba8")
-        self.session_card = SummaryCard("Current Session", "00:00:00", "#fab387")
+        cards_layout.setSpacing(15)
+        self.total_usage_card = SummaryCard(
+            "Total Usage", "00:00:00",
+            accent="#89b4fa", grad_start="#151C2B", grad_end="#111827",
+            icon_path=os.path.join(base_path, "clock.svg")
+        )
+        self.top_app_card = SummaryCard(
+            "Most Used App", "None",
+            accent="#f38ba8", grad_start="#1F1520", grad_end="#161019",
+            icon_path=os.path.join(base_path, "trophy.svg")
+        )
+        self.session_card = SummaryCard(
+            "Current Session", "00:00:00",
+            accent="#fab387", grad_start="#1F1A14", grad_end="#16120E",
+            icon_path=os.path.join(base_path, "bolt.svg")
+        )
         cards_layout.addWidget(self.total_usage_card)
         cards_layout.addWidget(self.top_app_card)
         cards_layout.addWidget(self.session_card)
@@ -323,92 +531,121 @@ class DashboardWindow(QWidget):
         self.resize(900, 600)
         
         self.setStyleSheet("""
-            QWidget#MainContainer {
-                background-color: #1e1e2e;
-                border-radius: 15px;
-                border: 1px solid #45475a;
+            QMainWindow, QWidget#MainContainer {
+                background-color: #161B22;
+                color: #CDD6F4;
+                font-family: 'Inter', 'Segoe UI Semibold', 'Segoe UI', sans-serif;
             }
             Sidebar {
-                background-color: #181825;
-                border-top-left-radius: 15px;
-                border-bottom-left-radius: 15px;
-                border-right: 1px solid #313244;
+                background-color: #0F1117;
+                border-right: 1px solid #1E2430;
             }
             QLabel#SidebarLogo {
-                color: #89b4fa;
-                font-size: 18px;
-                font-weight: bold;
+                color: #6366F1;
+                font-size: 22px;
+                font-weight: 900;
                 letter-spacing: 2px;
+                padding: 15px 5px;
             }
             SidebarButton {
                 background-color: transparent;
-                color: #bac2de;
+                color: #FFFFFF;
                 border: none;
                 border-radius: 8px;
                 text-align: left;
                 padding-left: 15px;
-                font-weight: 500;
-                font-size: 14px;
-                margin-right: 10px;
+                font-weight: 600;
+                font-size: 15px;
+                margin: 4px 12px;
+            }
+            SidebarButton QLabel {
+                color: #FFFFFF;
             }
             SidebarButton:hover {
-                background-color: rgba(69, 71, 90, 100);
-                color: #cdd6f4;
+                background-color: rgba(99, 102, 241, 0.1);
+            }
+            SidebarButton:hover QLabel {
+                color: #FFFFFF;
             }
             SidebarButton:checked {
-                background-color: rgba(137, 180, 250, 40);
-                color: #89b4fa;
-                border-left: 3px solid #89b4fa;
+                background-color: rgba(99, 102, 241, 0.15);
+                border-left: 4px solid #6366F1;
                 border-top-left-radius: 0px;
                 border-bottom-left-radius: 0px;
             }
+            SidebarButton:checked QLabel {
+                color: #FFFFFF;
+            }
+            QFrame#StatusCard {
+                background-color: #1E2430;
+                border: 1px solid #2D3748;
+                border-radius: 12px;
+            }
+            QLabel#StatusTitle {
+                color: #10B981;
+                font-size: 15px;
+                font-weight: bold;
+            }
+            QLabel#StatusSub {
+                color: #94A3B8;
+                font-size: 13px;
+            }
             QListWidget {
-                background-color: #181825;
-                border-radius: 8px;
-                border: 1px solid #313244;
-                color: #cdd6f4;
-                padding: 5px;
+                background-color: transparent;
+                border-radius: 12px;
+                border: 1px solid #1E2430;
+                color: #CDD6F4;
+                padding: 8px;
             }
             QListWidget::item {
-                padding: 10px;
-                border-bottom: 1px solid #313244;
-                border-radius: 5px;
+                padding: 14px 16px;
+                background-color: #1E2430;
+                border-radius: 8px;
+                margin-bottom: 6px;
+                border-left: 3px solid transparent;
             }
             QListWidget::item:hover {
-                background-color: #313244;
+                background-color: #252D3A;
+                border-left: 3px solid #6366F1;
             }
             QListWidget::item:selected {
-                background-color: rgba(137, 180, 250, 30);
-                color: #89b4fa;
+                background-color: rgba(99, 102, 241, 0.15);
+                border-left: 3px solid #6366F1;
+                color: #A5B4FC;
             }
             QPushButton {
-                background-color: #313244;
-                color: #cdd6f4;
-                border: 1px solid #45475a;
+                background-color: #1E2430;
+                color: #CDD6F4;
+                border: 1px solid #2D3748;
                 border-radius: 8px;
                 padding: 8px 18px;
                 font-weight: bold;
                 font-size: 13px;
             }
             QPushButton:hover {
-                background-color: #45475a;
-                border-color: #585b70;
+                background-color: #2D3748;
+                border-color: #6366F1;
             }
             QPushButton:pressed {
-                background-color: #1e1e2e;
+                background-color: #0F1117;
             }
             QGroupBox {
-                border: 1px solid #45475a;
-                border-radius: 8px;
-                margin-top: 15px;
-                color: #bac2de;
+                border: 1px solid #1E2430;
+                border-radius: 12px;
+                margin-top: 20px;
+                color: #94A3B8;
                 font-weight: bold;
-                padding-top: 10px;
+                padding-top: 15px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
+                left: 15px;
+                padding: 0 8px;
+            }
+            QWidget#ContentArea {
+                background: qradialgradient(cx:0.8, cy:0.2, radius:1.0,
+                    fx:0.8, fy:0.2,
+                    stop:0 #1a1f2e, stop:1 #161B22);
             }
         """)
 
@@ -433,46 +670,29 @@ class DashboardWindow(QWidget):
 
         # Content Area
         content_widget = QWidget()
+        content_widget.setObjectName("ContentArea")
         self.content_layout = QVBoxLayout(content_widget)
         self.content_layout.setContentsMargins(0, 0, 0, 0)
 
         # Custom Title Bar for Content Area
         title_bar = QWidget()
-        title_bar.setFixedHeight(40)
+        title_bar.setFixedHeight(45)
         title_bar_layout = QHBoxLayout(title_bar)
-        title_bar_layout.setContentsMargins(0, 0, 10, 0)
+        title_bar_layout.setContentsMargins(0, 0, 12, 0)
         title_bar_layout.addStretch()
         
-        window_btn_style = """
-            QPushButton {
-                background-color: transparent;
-                color: #7f849c;
-                border: none;
-                border-radius: 15px;
-                font-size: 16px;
-                padding: 0px;
-            }
-            QPushButton:hover {
-                background-color: rgba(127, 132, 156, 30);
-                color: #cdd6f4;
-            }
-        """
-
-        self.btn_min = QPushButton("—")
-        self.btn_min.setFixedSize(30, 30)
-        self.btn_min.setCursor(Qt.PointingHandCursor)
-        self.btn_min.setStyleSheet(window_btn_style)
+        # Minimize Button
+        self.btn_min = WindowButton('min', "#6366F1") # Indigo theme
         self.btn_min.clicked.connect(self.showMinimized)
         
-        self.btn_close = QPushButton("✕")
-        self.btn_close.setFixedSize(30, 30)
-        self.btn_close.setCursor(Qt.PointingHandCursor)
-        self.btn_close.setStyleSheet(window_btn_style + "QPushButton:hover { background-color: #f38ba8; color: #11111b; }")
+        # Close Button
+        self.btn_close = WindowButton('close', "#f38ba8") # Rose theme
         self.btn_close.clicked.connect(self.hide)
         
         title_bar_layout.addWidget(self.btn_min)
         title_bar_layout.addWidget(self.btn_close)
         self.content_layout.addWidget(title_bar)
+
 
         # Stacked Widget
         self.stacked_widget = QStackedWidget()
@@ -574,7 +794,7 @@ class DashboardWindow(QWidget):
             self.summary_view.top_app_card.value_label.setText(cleaned_data[0][1])
             
             self.summary_view.recent_list.clear()
-            self.summary_view.recent_list.setIconSize(QSize(24, 24))
+            self.summary_view.recent_list.setIconSize(QSize(32, 32))
             for app, friendly_name, seconds in cleaned_data[:5]:
                 if app in active_sessions:
                     item_text = f"{friendly_name} | {format_time(seconds)} (Session: {format_time(active_sessions[app])})"
