@@ -33,16 +33,11 @@ class AppController(QObject):
         keyboard.add_hotkey('ctrl+shift+t', self.show_dashboard_sig.emit)
 
     def setup_tray(self):
-        # Create a simple icon programmatically
-        pixmap = QPixmap(64, 64)
-        pixmap.fill(QColor("transparent"))
-        painter = QPainter(pixmap)
-        painter.setBrush(QColor("#89b4fa"))
-        painter.setPen(Qt.NoPen)
-        painter.drawEllipse(4, 4, 56, 56)
-        painter.end()
-        icon = QIcon(pixmap)
-
+        import os
+        logo_path = os.path.join(os.path.dirname(__file__), "assets", "logo.png")
+        icon = QIcon(logo_path) if os.path.exists(logo_path) else QIcon()
+        
+        QApplication.setWindowIcon(icon)
         self.tray_icon = QSystemTrayIcon(icon)
         self.tray_icon.setToolTip("Time Forge (Ctrl+Shift+T)")
 

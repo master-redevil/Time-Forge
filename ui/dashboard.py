@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QStackedWidget, QListWidget, QListWidgetItem, QFileIconProvider, QStyle,
     QFrame, QGridLayout, QScrollArea, QGroupBox, QGraphicsDropShadowEffect, QGraphicsColorizeEffect,
-    QGraphicsOpacityEffect
+    QGraphicsOpacityEffect, QApplication
 )
 from PySide6.QtCore import Qt, QTimer, QFileInfo, Signal, QSize, QPropertyAnimation, QEasingCurve, QRect
 from PySide6.QtGui import QPainter, QColor, QFont, QIcon, QPixmap, QBrush, QPainterPath, QLinearGradient, QPen
@@ -141,12 +141,12 @@ class StatusCard(QFrame):
         self.setObjectName("StatusCard")
         self.setMinimumHeight(75)
         
-        # Consistent background gradient
+        # Consistent background gradient - now more vibrant
         self.setStyleSheet("""
             QFrame#StatusCard {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #1E2430, stop:1 #161B22);
-                border: 1px solid rgba(255, 255, 255, 5);
+                    stop:0 #13251F, stop:1 #0C1412);
+                border: 1px solid rgba(16, 185, 129, 0.1);
                 border-radius: 12px;
             }
         """)
@@ -203,7 +203,7 @@ class StatusCard(QFrame):
         self.accent_bar.move(0, (self.height() - bar_h) // 2)
 
     def set_active(self, is_active, start_time="--:--"):
-        color = "#a6e3a1" if is_active else "#f9e2af"
+        color = "#10B981" if is_active else "#F59E0B"
         self.dot.setStyleSheet(f"background-color: {color}; border-radius: 5px;")
         self.accent_bar.setStyleSheet(f"background-color: {color}; border-radius: 1.5px;")
         
@@ -229,19 +229,31 @@ class Sidebar(QFrame):
         layout.setContentsMargins(10, 20, 10, 20)
         layout.setSpacing(10)
 
-        self.logo = QLabel("TIME FORGE")
+        # Custom Image Logo
+        self.logo = QLabel()
         self.logo.setObjectName("SidebarLogo")
         self.logo.setAlignment(Qt.AlignCenter)
+        self.logo.setContentsMargins(10, 10, 10, 10)
+        
+        logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "logo.png")
+        if os.path.exists(logo_path):
+            pixmap = QPixmap(logo_path)
+            # Scale to reasonable width while maintaining aspect ratio
+            scaled_pixmap = pixmap.scaledToWidth(160, Qt.SmoothTransformation)
+            self.logo.setPixmap(scaled_pixmap)
+        else:
+            self.logo.setText("TIME FORGE")
+            self.logo.setStyleSheet("color: #6366F1; font-size: 22px; font-weight: 900; letter-spacing: 2px;")
         
         # Native Electric Indigo glow
         glow = QGraphicsDropShadowEffect()
-        glow.setBlurRadius(15)
+        glow.setBlurRadius(20)
         glow.setColor(QColor("#6366F1"))
         glow.setOffset(0, 0)
         self.logo.setGraphicsEffect(glow)
         
         layout.addWidget(self.logo)
-        layout.addSpacing(20)
+        layout.addSpacing(15)
 
         # Paths to icons
         base_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "icons")
@@ -399,17 +411,17 @@ class SummaryView(QWidget):
         cards_layout.setSpacing(15)
         self.total_usage_card = SummaryCard(
             "Total Usage", "00:00:00",
-            accent="#89b4fa", grad_start="#151C2B", grad_end="#111827",
+            accent="#3B82F6", grad_start="#1E293B", grad_end="#0F172A",
             icon_path=os.path.join(base_path, "clock.svg")
         )
         self.top_app_card = SummaryCard(
             "Most Used App", "None",
-            accent="#f38ba8", grad_start="#1F1520", grad_end="#161019",
+            accent="#F43F5E", grad_start="#31141A", grad_end="#1A0A0E",
             icon_path=os.path.join(base_path, "trophy.svg")
         )
         self.session_card = SummaryCard(
             "Current Session", "00:00:00",
-            accent="#fab387", grad_start="#1F1A14", grad_end="#16120E",
+            accent="#F59E0B", grad_start="#312012", grad_end="#1A1208",
             icon_path=os.path.join(base_path, "bolt.svg")
         )
         cards_layout.addWidget(self.total_usage_card)
@@ -528,7 +540,23 @@ class DashboardWindow(QWidget):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.resize(900, 600)
+        
+        # Set Window Icon from logo.png
+        import os
+        logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "logo.png")
+        if os.path.exists(logo_path):
+            self.setWindowIcon(QIcon(logo_path))
+            
+        self.resize(1000, 650)
+        self.center_on_screen()
+
+    def center_on_screen(self):
+        # use availableGeometry to exclude taskbar area
+        screen = QApplication.primaryScreen().availableGeometry()
+        size = self.geometry()
+        x = (screen.width() - size.width()) // 2
+        y = (screen.height() - size.height()) // 2
+        self.move(screen.left() + x, screen.top() + y)
         
         self.setStyleSheet("""
             QMainWindow, QWidget#MainContainer {
