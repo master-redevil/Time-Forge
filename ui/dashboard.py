@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QStackedWidget, QListWidget, QListWidgetItem, QFileIconProvider, QStyle,
     QFrame, QGridLayout, QScrollArea, QGroupBox, QGraphicsDropShadowEffect, QGraphicsColorizeEffect,
-    QGraphicsOpacityEffect, QApplication
+    QGraphicsOpacityEffect, QApplication, QAbstractItemView
 )
 from PySide6.QtCore import Qt, QTimer, QFileInfo, Signal, QSize, QPropertyAnimation, QEasingCurve, QRect
 from PySide6.QtGui import QPainter, QColor, QFont, QIcon, QPixmap, QBrush, QPainterPath, QLinearGradient, QPen
@@ -16,6 +16,26 @@ import ctypes
 from ctypes import wintypes
 import datetime
 from PySide6.QtCore import Property
+
+class SmoothScrollList(QListWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        
+        self._scroll_anim = QPropertyAnimation(self.verticalScrollBar(), b"value")
+        self._scroll_anim.setDuration(300)
+        self._scroll_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+    def wheelEvent(self, event):
+        delta = event.angleDelta().y()
+        target = self.verticalScrollBar().value() - delta
+        
+        self._scroll_anim.stop()
+        self._scroll_anim.setStartValue(self.verticalScrollBar().value())
+        self._scroll_anim.setEndValue(max(self.verticalScrollBar().minimum(), 
+                                         min(target, self.verticalScrollBar().maximum())))
+        self._scroll_anim.start()
 
 class WindowButton(QPushButton):
     def __init__(self, icon_type, hover_color, parent=None):
@@ -435,7 +455,7 @@ class SummaryView(QWidget):
         recent_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #cdd6f4; margin-bottom: 5px;")
         layout.addWidget(recent_label)
         
-        self.recent_list = QListWidget()
+        self.recent_list = SmoothScrollList()
         self.recent_list.setObjectName("RecentList")
         layout.addWidget(self.recent_list, 1) # Give it stretch
 
