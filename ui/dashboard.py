@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QStackedWidget, QListWidget, QListWidgetItem, QFileIconProvider, QStyle,
     QFrame, QGridLayout, QScrollArea, QGroupBox, QGraphicsDropShadowEffect, QGraphicsColorizeEffect,
-    QGraphicsOpacityEffect, QApplication, QAbstractItemView
+    QGraphicsOpacityEffect, QApplication, QAbstractItemView, QLineEdit
 )
 from PySide6.QtCore import Qt, QTimer, QFileInfo, Signal, QSize, QPropertyAnimation, QEasingCurve, QRect
 from PySide6.QtGui import QPainter, QColor, QFont, QIcon, QPixmap, QBrush, QPainterPath, QLinearGradient, QPen
@@ -154,6 +154,57 @@ class SidebarButton(QPushButton):
         self.text_label.setStyleSheet("background: transparent; color: white; font-weight: 600; font-size: 15px;")
         layout.addWidget(self.text_label)
         layout.addStretch()
+
+        # Hover animation properties
+        self._hover_alpha = 0
+        self.hover_anim = QPropertyAnimation(self, b"hover_alpha")
+        self.hover_anim.setDuration(250)
+        self.hover_anim.setEasingCurve(QEasingCurve.OutCubic)
+
+    @Property(int)
+    def hover_alpha(self): return self._hover_alpha
+    @hover_alpha.setter
+    def hover_alpha(self, v):
+        self._hover_alpha = v
+        self.update()
+
+    def enterEvent(self, event):
+        self.hover_anim.stop()
+        self.hover_anim.setStartValue(self._hover_alpha)
+        self.hover_anim.setEndValue(30) # ~0.12 opacity
+        self.hover_anim.start()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.hover_anim.stop()
+        self.hover_anim.setStartValue(self._hover_alpha)
+        self.hover_anim.setEndValue(0)
+        self.hover_anim.start()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        rect = self.rect().adjusted(12, 4, -12, -4)
+        
+        if self.isChecked():
+            # Active state background
+            painter.setBrush(QColor(99, 102, 241, 45))
+            painter.setPen(Qt.NoPen)
+            painter.drawRoundedRect(rect, 8, 8)
+            
+            # Left accent indicator (pill shape)
+            painter.setBrush(QColor("#6366F1"))
+            painter.drawRoundedRect(0, 12, 4, self.height() - 24, 2, 2)
+        elif self._hover_alpha > 0:
+            # Hover state background
+            painter.setBrush(QColor(99, 102, 241, self._hover_alpha))
+            painter.setPen(Qt.NoPen)
+            painter.drawRoundedRect(rect, 8, 8)
+        
+        # Child widgets (labels) will paint themselves after this
+
 
 class StatusCard(QFrame):
     def __init__(self, parent=None):
@@ -459,101 +510,285 @@ class SummaryView(QWidget):
         self.recent_list.setObjectName("RecentList")
         layout.addWidget(self.recent_list, 1) # Give it stretch
 
+class ToggleSwitch(QWidget):
+    toggled = Signal(bool)
+
+    def __init__(self, parent=None, active_color="#6366F1", bg_color="#2D3748"):
+        super().__init__(parent)
+        self.setFixedSize(44, 22)
+        self.setCursor(Qt.PointingHandCursor)
+        
+        self._active_color = QColor(active_color)
+        self._bg_color = QColor(bg_color)
+        self._circle_color = QColor("#FFFFFF")
+        
+        self._status = False
+        self._thumb_pos = 2
+        
+        self._anim = QPropertyAnimation(self, b"thumb_pos")
+        self._anim.setDuration(200)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+
+    @Property(float)
+    def thumb_pos(self): return self._thumb_pos
+    @thumb_pos.setter
+    def thumb_pos(self, pos):
+        self._thumb_pos = pos
+        self.update()
+
+    def setChecked(self, status):
+        if self._status == status: return
+        self._status = status
+        self._anim.stop()
+        self._anim.setStartValue(self._thumb_pos)
+        self._anim.setEndValue(24 if status else 2)
+        self._anim.start()
+
+    def isChecked(self):
+        return self._status
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.setChecked(not self._status)
+            self.toggled.emit(self._status)
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Background
+        path = QPainterPath()
+        path.addRoundedRect(0, 0, self.width(), self.height(), 11, 11)
+        
+        bg_color = self._active_color if self._status else self._bg_color
+        painter.fillPath(path, bg_color)
+        
+        # Thumb
+        painter.setBrush(self._circle_color)
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(int(self._thumb_pos), 2, 18, 18)
+
+class AppListItemWidget(QWidget):
+    toggled = Signal(str, bool)
+
+    def __init__(self, app_name, display_name, exe_path=None, is_tracked=False, parent=None):
+        super().__init__(parent)
+        self.app_name = app_name
+        self.setFixedHeight(60)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(15, 0, 15, 0)
+        layout.setSpacing(15)
+        
+        # Icon
+        self.icon_label = QLabel()
+        self.icon_label.setFixedSize(32, 32)
+        self.icon_label.setAlignment(Qt.AlignCenter)
+        
+        if exe_path and os.path.exists(exe_path):
+            file_info = QFileInfo(exe_path)
+            icon = QFileIconProvider().icon(file_info)
+            pixmap = icon.pixmap(32, 32)
+            self.icon_label.setPixmap(pixmap)
+        else:
+            # Fallback icon or generic app icon
+            self.icon_label.setText("📦")
+            self.icon_label.setStyleSheet("font-size: 20px;")
+            
+        layout.addWidget(self.icon_label)
+        
+        # Name
+        self.name_label = QLabel(display_name)
+        self.name_label.setStyleSheet("color: white; font-weight: 600; font-size: 14px;")
+        layout.addWidget(self.name_label)
+        
+        layout.addStretch()
+        
+        # Toggle
+        self.toggle = ToggleSwitch()
+        self.toggle.setChecked(is_tracked)
+        self.toggle.toggled.connect(lambda checked: self.toggled.emit(self.app_name, checked))
+        layout.addWidget(self.toggle)
+
 class SettingsView(QWidget):
     apps_changed = Signal()
 
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setContentsMargins(20, 0, 20, 20)
+        layout.setSpacing(15)
         
-        header = QLabel("Application Settings")
-        header.setStyleSheet("font-size: 24px; font-weight: bold; color: #f5e0dc; margin-bottom: 10px;")
-        layout.addWidget(header)
+        # Header Row
+        header_layout = QHBoxLayout()
+        header = QLabel("App Management")
+        header.setStyleSheet("font-size: 24px; font-weight: bold; color: #f5e0dc;")
+        header_layout.addWidget(header)
+        header_layout.addStretch()
+        
+        # Search Bar
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search applications...")
+        self.search_input.setFixedWidth(250)
+        self.search_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #1E2430;
+                border: 1px solid #2D3748;
+                border-radius: 8px;
+                padding: 8px 12px;
+                color: #CDD6F4;
+                font-size: 13px;
+            }
+            QLineEdit:focus {
+                border-color: #6366F1;
+            }
+        """)
+        self.search_input.textChanged.connect(self.filter_apps)
+        header_layout.addWidget(self.search_input)
+        
+        # Refresh Button
+        self.btn_refresh = QPushButton()
+        self.btn_refresh.setFixedSize(36, 36)
+        self.btn_refresh.setCursor(Qt.PointingHandCursor)
+        self.btn_refresh.setStyleSheet("""
+            QPushButton {
+                background-color: #1E2430;
+                border: 1px solid #2D3748;
+                border-radius: 8px;
+                color: #CDD6F4;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                background-color: #2D3748;
+                border-color: #6366F1;
+            }
+        """)
+        self.btn_refresh.setText("🔄")
+        self.btn_refresh.clicked.connect(self.refresh_data)
+        header_layout.addWidget(self.btn_refresh)
+        
+        layout.addLayout(header_layout)
 
-        lists_layout = QHBoxLayout()
-        
-        # Left column: Running Processes
-        running_group = QGroupBox("Running Processes")
-        running_layout = QVBoxLayout(running_group)
-        self.running_list = QListWidget()
-        self.btn_refresh = QPushButton("Refresh List")
-        self.btn_refresh.clicked.connect(self.load_running_processes)
-        self.btn_add = QPushButton("Track Selected ->")
-        self.btn_add.clicked.connect(self.add_app)
-        
-        running_layout.addWidget(self.running_list)
-        running_layout.addWidget(self.btn_refresh)
-        running_layout.addWidget(self.btn_add)
+        # App List
+        self.app_list = SmoothScrollList()
+        self.app_list.setObjectName("SettingsAppList")
+        self.app_list.setStyleSheet("""
+            QListWidget#SettingsAppList {
+                background-color: transparent;
+                border: none;
+            }
+            QListWidget#SettingsAppList::item {
+                background-color: #1E2430;
+                border-radius: 12px;
+                margin-bottom: 8px;
+                padding: 0px;
+            }
+            QListWidget#SettingsAppList::item:hover {
+                background-color: #252D3A;
+            }
+        """)
+        layout.addWidget(self.app_list)
 
-        # Right column: Tracked Apps
-        tracked_group = QGroupBox("Tracked Applications")
-        tracked_layout = QVBoxLayout(tracked_group)
-        self.tracked_list = QListWidget()
-        self.btn_remove = QPushButton("<- Stop Tracking")
-        self.btn_remove.clicked.connect(self.remove_app)
-        
-        tracked_layout.addWidget(self.tracked_list)
-        tracked_layout.addWidget(self.btn_remove)
-
-        lists_layout.addWidget(running_group)
-        lists_layout.addWidget(tracked_group)
-        layout.addLayout(lists_layout)
+        self.all_apps_data = [] # List of dicts: {name, display_name, exe, tracked}
 
     def clean_name(self, name):
         if name.lower().endswith('.exe'):
             return name[:-4].title()
         return name.title()
 
-    def load_tracked_apps(self):
-        self.tracked_list.clear()
-        apps = database.get_tracked_apps()
-        for app in apps:
-            item = QListWidgetItem(self.clean_name(app))
-            item.setData(Qt.UserRole, app)
-            self.tracked_list.addItem(item)
+    def refresh_data(self):
+        self.load_all_apps()
+        self.filter_apps()
 
-    def load_running_processes(self):
-        self.running_list.clear()
-        running = set()
-        self.running_exes = {}
+    def load_all_apps(self):
+        # Get running processes
+        running = {} # name -> exe
         for proc in psutil.process_iter(['name', 'exe']):
             try:
                 name = proc.info.get('name')
                 exe = proc.info.get('exe')
                 if name:
                     name_lower = name.lower()
-                    running.add(name_lower)
-                    if exe and name_lower not in self.running_exes:
-                        self.running_exes[name_lower] = exe
+                    if exe and name_lower not in running:
+                        running[name_lower] = exe
+                    elif name_lower not in running:
+                        running[name_lower] = None
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
         
-        tracked = set(database.get_tracked_apps())
-        available = sorted(list(running - tracked))
-        for app in available:
-            item = QListWidgetItem(self.clean_name(app))
-            item.setData(Qt.UserRole, app)
-            self.running_list.addItem(item)
+        # Get tracked apps
+        tracked_apps = database.get_tracked_apps()
+        tracked_set = set(tracked_apps)
+        
+        self.all_apps_data = []
+        
+        # Merge tracked apps
+        for app in tracked_apps:
+            self.all_apps_data.append({
+                'name': app,
+                'display_name': self.clean_name(app),
+                'exe': running.get(app), # Try to get current exe path if running
+                'tracked': True
+            })
+            if app in running:
+                del running[app]
+        
+        # Add remaining running apps
+        for app, exe in running.items():
+            self.all_apps_data.append({
+                'name': app,
+                'display_name': self.clean_name(app),
+                'exe': exe,
+                'tracked': False
+            })
+        
+        # Sort by display name
+        self.all_apps_data.sort(key=lambda x: x['display_name'])
 
-    def add_app(self):
-        item = self.running_list.currentItem()
-        if not item: return
-        app_name = item.data(Qt.UserRole)
-        exe_path = getattr(self, 'running_exes', {}).get(app_name)
-        if database.add_tracked_app(app_name, exe_path):
-            self.load_tracked_apps()
-            self.load_running_processes()
-            self.apps_changed.emit()
+    def filter_apps(self):
+        search_text = self.search_input.text().lower()
+        self.app_list.clear()
+        
+        for app_data in self.all_apps_data:
+            if search_text and search_text not in app_data['display_name'].lower():
+                continue
+                
+            item = QListWidgetItem(self.app_list)
+            item.setSizeHint(QSize(0, 60))
+            
+            widget = AppListItemWidget(
+                app_data['name'], 
+                app_data['display_name'], 
+                app_data['exe'], 
+                app_data['tracked']
+            )
+            widget.toggled.connect(self.handle_toggle)
+            
+            self.app_list.addItem(item)
+            self.app_list.setItemWidget(item, widget)
 
-    def remove_app(self):
-        item = self.tracked_list.currentItem()
-        if not item: return
-        app_name = item.data(Qt.UserRole)
-        database.remove_tracked_app(app_name)
-        self.load_tracked_apps()
-        self.load_running_processes()
+    def handle_toggle(self, app_name, checked):
+        if checked:
+            exe_path = next((a['exe'] for a in self.all_apps_data if a['name'] == app_name), None)
+            if not database.add_tracked_app(app_name, exe_path):
+                if exe_path:
+                    database.update_app_path(app_name, exe_path)
+        else:
+            database.remove_tracked_app(app_name)
+        
+        for app in self.all_apps_data:
+            if app['name'] == app_name:
+                app['tracked'] = checked
+                break
+                
         self.apps_changed.emit()
+
+    def load_tracked_apps(self):
+        self.refresh_data()
+
+    def load_running_processes(self):
+        pass # Handled by refresh_data
 
 class DashboardWindow(QWidget):
     def __init__(self):
@@ -609,19 +844,7 @@ class DashboardWindow(QWidget):
             SidebarButton QLabel {
                 color: #FFFFFF;
             }
-            SidebarButton:hover {
-                background-color: rgba(99, 102, 241, 0.1);
-            }
-            SidebarButton:hover QLabel {
-                color: #FFFFFF;
-            }
-            SidebarButton:checked {
-                background-color: rgba(99, 102, 241, 0.15);
-                border-left: 4px solid #6366F1;
-                border-top-left-radius: 0px;
-                border-bottom-left-radius: 0px;
-            }
-            SidebarButton:checked QLabel {
+            SidebarButton QLabel {
                 color: #FFFFFF;
             }
             QFrame#StatusCard {
@@ -749,6 +972,7 @@ class DashboardWindow(QWidget):
         self.stats_view = QWidget() # Placeholder for stats view
         self.apps_view = QListWidget()
         self.settings_view = SettingsView()
+        self.settings_view.apps_changed.connect(self.load_data)
 
         self.stacked_widget.addWidget(self.summary_view)
         self.stacked_widget.addWidget(self.stats_view)
@@ -814,16 +1038,26 @@ class DashboardWindow(QWidget):
         self.sidebar.set_active_button(index)
         if index == 3:
             self.settings_view.load_tracked_apps()
-            self.settings_view.load_running_processes()
+            self.settings_view.search_input.setFocus()
         self.load_data()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drag_pos = event.globalPosition().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.LeftButton:
+            new_pos = event.globalPosition().toPoint()
+            diff = new_pos - self.drag_pos
+            self.move(self.pos() + diff)
+            self.drag_pos = new_pos
+        super().mouseMoveEvent(event)
 
     def load_data(self):
         data = database.get_today_usage()
-        tracked_apps = set(database.get_tracked_apps())
-        filtered_data = {k: v for k, v in data.items() if k in tracked_apps}
-        sorted_data = sorted(filtered_data.items(), key=lambda x: x[1], reverse=True)
-        
-        active_sessions = database.get_active_sessions()
+        tracked_set = set(database.get_tracked_apps())
+        filtered_data = {k: v for k, v in data.items() if k in tracked_set}
         app_paths = database.get_app_paths()
         icon_provider = QFileIconProvider()
 
@@ -832,18 +1066,27 @@ class DashboardWindow(QWidget):
                 return name[:-4].title()
             return name.title()
 
-        cleaned_data = [(app, clean_name(app), seconds) for app, seconds in sorted_data]
+        cleaned_data = []
+        for app in sorted(list(tracked_set)):
+            seconds = filtered_data.get(app, 0)
+            cleaned_data.append((app, clean_name(app), seconds))
+        
+        # Sort by usage (descending) but keep all tracked apps
+        cleaned_data.sort(key=lambda x: x[2], reverse=True)
 
         # Update Summary View
         total_device_seconds = database.get_today_device_activity()
         self.summary_view.total_usage_card.value_label.setText(format_time(total_device_seconds))
         
-        if cleaned_data:
-            self.summary_view.top_app_card.value_label.setText(cleaned_data[0][1])
+        active_sessions = database.get_active_sessions()
+        used_apps = [d for d in cleaned_data if d[2] > 0 or d[0] in active_sessions]
+
+        if used_apps:
+            self.summary_view.top_app_card.value_label.setText(used_apps[0][1])
             
             self.summary_view.recent_list.clear()
             self.summary_view.recent_list.setIconSize(QSize(32, 32))
-            for app, friendly_name, seconds in cleaned_data[:5]:
+            for app, friendly_name, seconds in used_apps[:5]:
                 if app in active_sessions:
                     item_text = f"{friendly_name} | {format_time(seconds)} (Session: {format_time(active_sessions[app])})"
                 else:
