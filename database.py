@@ -154,10 +154,41 @@ def log_usage(app_name, duration_seconds):
     conn.close()
 
 def get_today_usage():
+    return get_usage_for_date(datetime.date.today().isoformat())
+
+def get_usage_for_date(date_str):
     conn = get_connection()
     cursor = conn.cursor()
-    today = datetime.date.today().isoformat()
-    cursor.execute('SELECT app_name, duration_seconds FROM UsageLogs WHERE log_date = ?', (today,))
+    cursor.execute('SELECT app_name, duration_seconds FROM UsageLogs WHERE log_date = ?', (date_str,))
+    data = {row[0]: row[1] for row in cursor.fetchall()}
+    conn.close()
+    return data
+
+def get_usage_history(days=7):
+    conn = get_connection()
+    cursor = conn.cursor()
+    start_date = (datetime.date.today() - datetime.timedelta(days=days-1)).isoformat()
+    cursor.execute('''
+        SELECT log_date, SUM(duration_seconds) 
+        FROM UsageLogs 
+        WHERE log_date >= ? 
+        GROUP BY log_date 
+        ORDER BY log_date ASC
+    ''', (start_date,))
+    data = {row[0]: row[1] for row in cursor.fetchall()}
+    conn.close()
+    return data
+
+def get_app_usage_history(app_name, days=7):
+    conn = get_connection()
+    cursor = conn.cursor()
+    start_date = (datetime.date.today() - datetime.timedelta(days=days-1)).isoformat()
+    cursor.execute('''
+        SELECT log_date, duration_seconds 
+        FROM UsageLogs 
+        WHERE app_name = ? AND log_date >= ? 
+        ORDER BY log_date ASC
+    ''', (app_name.lower(), start_date))
     data = {row[0]: row[1] for row in cursor.fetchall()}
     conn.close()
     return data
@@ -201,6 +232,21 @@ def get_active_sessions():
     conn.close()
     return data
 
+def get_sessions_for_date(date_str):
+    conn = get_connection()
+    cursor = conn.cursor()
+    # We look for sessions that started on this date
+    # In a more advanced version, we'd look for sessions overlapping the date
+    cursor.execute('''
+        SELECT app_name, start_date, duration_seconds 
+        FROM Sessions 
+        WHERE date(start_date) = ? 
+        ORDER BY start_date ASC
+    ''', (date_str,))
+    data = [{'app': row[0], 'start': row[1], 'duration': row[2]} for row in cursor.fetchall()]
+    conn.close()
+    return data
+
 def log_device_activity(duration_seconds):
     conn = get_connection()
     cursor = conn.cursor()
@@ -214,10 +260,26 @@ def log_device_activity(duration_seconds):
     conn.close()
 
 def get_today_device_activity():
+    return get_device_activity_for_date(datetime.date.today().isoformat())
+
+def get_device_activity_for_date(date_str):
     conn = get_connection()
     cursor = conn.cursor()
-    today = datetime.date.today().isoformat()
-    cursor.execute('SELECT duration_seconds FROM DeviceActivity WHERE log_date = ?', (today,))
+    cursor.execute('SELECT duration_seconds FROM DeviceActivity WHERE log_date = ?', (date_str,))
     row = cursor.fetchone()
     conn.close()
     return row[0] if row else 0
+
+def get_device_activity_history(days=7):
+    conn = get_connection()
+    cursor = conn.cursor()
+    start_date = (datetime.date.today() - datetime.timedelta(days=days-1)).isoformat()
+    cursor.execute('''
+        SELECT log_date, duration_seconds 
+        FROM DeviceActivity 
+        WHERE log_date >= ? 
+        ORDER BY log_date ASC
+    ''', (start_date,))
+    data = {row[0]: row[1] for row in cursor.fetchall()}
+    conn.close()
+    return data

@@ -2,12 +2,13 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QStackedWidget, QListWidget, QListWidgetItem, QFileIconProvider, QStyle,
     QFrame, QGridLayout, QScrollArea, QGroupBox, QGraphicsDropShadowEffect, QGraphicsColorizeEffect,
-    QGraphicsOpacityEffect, QApplication, QAbstractItemView, QLineEdit
+    QGraphicsOpacityEffect, QApplication, QAbstractItemView, QLineEdit, QCalendarWidget, QMenu, QWidgetAction
 )
-from PySide6.QtCore import Qt, QTimer, QFileInfo, Signal, QSize, QPropertyAnimation, QEasingCurve, QRect
+from PySide6.QtCore import Qt, QTimer, QFileInfo, Signal, QSize, QPropertyAnimation, QEasingCurve, QRect, QDateTime, QDate, QMargins
 from PySide6.QtGui import QPainter, QColor, QFont, QIcon, QPixmap, QBrush, QPainterPath, QLinearGradient, QPen
 from PySide6.QtCharts import (
-    QChart, QChartView, QPieSeries, QBarSeries, QStackedBarSeries, QBarSet, QBarCategoryAxis, QValueAxis
+    QChart, QChartView, QPieSeries, QBarSeries, QStackedBarSeries, QBarSet, 
+    QBarCategoryAxis, QValueAxis, QLineSeries, QDateTimeAxis
 )
 import database
 import os
@@ -15,6 +16,7 @@ import psutil
 import ctypes
 from ctypes import wintypes
 import datetime
+import math
 from PySide6.QtCore import Property
 
 class SmoothScrollList(QListWidget):
@@ -787,8 +789,427 @@ class SettingsView(QWidget):
     def load_tracked_apps(self):
         self.refresh_data()
 
-    def load_running_processes(self):
-        pass # Handled by refresh_data
+class TimelineWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(400)
+        self.sessions = []
+        self.selected_date = QDate.currentDate()
+        self.app_colors = {}
+        self.colors = ["#89b4fa", "#f38ba8", "#a6e3a1", "#f9e2af", "#cba6f7", "#89dceb", "#fab387"]
+
+    def set_data(self, sessions, date):
+        self.sessions = sessions
+        self.selected_date = date
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Draw Background
+        painter.fillRect(self.rect(), QColor("#1E2430"))
+        
+        # Margins
+        left_margin = 100
+        right_margin = 30
+        top_margin = 40
+        bottom_margin = 40
+        
+        draw_rect = self.rect().adjusted(left_margin, top_margin, -right_margin, -bottom_margin)
+        w = draw_rect.width()
+        h = draw_rect.height()
+        
+        if not self.sessions:
+            painter.setPen(QColor("#94A3B8"))
+            painter.drawText(self.rect(), Qt.AlignCenter, "No session data for this day")
+            return
+
+        # Draw Hour Lines
+        painter.setPen(QPen(QColor(255, 255, 255, 10), 1))
+        for hour in range(25):
+            x = draw_rect.left() + (hour / 24.0) * w
+            painter.drawLine(int(x), draw_rect.top(), int(x), draw_rect.bottom())
+            if hour % 4 == 0:
+                painter.setPen(QColor("#64748B"))
+                font = painter.font()
+                font.setPointSize(8)
+                painter.setFont(font)
+                painter.drawText(int(x) - 15, draw_rect.bottom() + 20, f"{hour:02}:00")
+                painter.setPen(QPen(QColor(255, 255, 255, 10), 1))
+
+        # Draw Current Time Indicator (if viewing today)
+        if self.selected_date == QDate.currentDate():
+            now = QDateTime.currentDateTime().time()
+            now_sec = now.hour() * 3600 + now.minute() * 60 + now.second()
+            x_now = draw_rect.left() + (now_sec / (24.0 * 3600)) * w
+            painter.setPen(QPen(QColor("#F43F5E"), 2, Qt.DashLine))
+            painter.drawLine(int(x_now), draw_rect.top(), int(x_now), draw_rect.bottom())
+            painter.setBrush(QColor("#F43F5E"))
+            painter.drawEllipse(int(x_now) - 3, draw_rect.top() - 3, 6, 6)
+
+        # Get unique apps for swimlanes
+        apps_list = sorted(list(set(s['app'] for s in self.sessions)))
+        row_h = min(40, h / max(len(apps_list), 1))
+        
+        # Draw Session Blocks
+        for session in self.sessions:
+            app = session['app']
+            if app not in self.app_colors:
+                self.app_colors[app] = QColor(self.colors[len(self.app_colors) % len(self.colors)])
+            
+            color = self.app_colors[app]
+            
+            try:
+                # Parse start date/time
+                # sqlite returns YYYY-MM-DDTHH:MM:SS
+                dt = QDateTime.fromString(session['start'], Qt.ISODate)
+                time_obj = dt.time()
+                start_sec = time_obj.hour() * 3600 + time_obj.minute() * 60 + time_obj.second()
+                duration = session['duration']
+                
+                x_start = draw_rect.left() + (start_sec / (24.0 * 3600)) * w
+                x_width = (duration / (24.0 * 3600)) * w
+                x_width = max(x_width, 3) # Min width
+                
+                app_idx = apps_list.index(app)
+                y = draw_rect.top() + app_idx * row_h
+                
+                block_rect = QRect(int(x_start), int(y) + 5, int(x_width), int(row_h) - 10)
+                
+                # Highlight block
+                painter.setBrush(color)
+                painter.setPen(Qt.NoPen)
+                painter.drawRoundedRect(block_rect, 4, 4)
+                
+                # Subtle glow
+                glow_color = QColor(color)
+                glow_color.setAlpha(40)
+                painter.setBrush(glow_color)
+                painter.drawRoundedRect(block_rect.adjusted(-2, -2, 2, 2), 6, 6)
+                
+            except Exception as e:
+                continue
+
+        # Draw App Labels
+        for i, app in enumerate(apps_list):
+            y = draw_rect.top() + i * row_h
+            painter.setPen(QColor("#CDD6F4"))
+            font = painter.font()
+            font.setBold(True)
+            font.setPointSize(9)
+            painter.setFont(font)
+            display_name = app[:-4].title() if app.lower().endswith('.exe') else app.title()
+            painter.drawText(15, int(y + row_h/2 + 5), display_name)
+
+class AnalyticsView(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.selected_date = QDate.currentDate()
+        self.setup_ui()
+        # Data will be loaded when switch_view is called or initially
+        
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 0, 20, 20)
+        layout.setSpacing(20)
+        
+        # Header Row
+        header_layout = QHBoxLayout()
+        header = QLabel("Usage Analytics")
+        header.setStyleSheet("font-size: 26px; font-weight: bold; color: #f5e0dc;")
+        header_layout.addWidget(header)
+        header_layout.addStretch()
+        
+        # Date Selector
+        self.date_btn = QPushButton(self.selected_date.toString("MMM dd, yyyy"))
+        self.date_btn.setFixedWidth(180)
+        self.date_btn.setCursor(Qt.PointingHandCursor)
+        self.date_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1E2430;
+                border: 1px solid #2D3748;
+                border-radius: 10px;
+                padding: 10px 15px;
+                color: #CDD6F4;
+                font-weight: 800;
+                font-size: 13px;
+                text-align: left;
+            }
+            QPushButton:hover {
+                border-color: #6366F1;
+                background-color: #252D3A;
+            }
+        """)
+        self.date_btn.clicked.connect(self.show_calendar)
+        header_layout.addWidget(self.date_btn)
+        layout.addLayout(header_layout)
+
+        # Tab Bar
+        tab_container = QWidget()
+        tab_container.setFixedHeight(50)
+        tab_layout = QHBoxLayout(tab_container)
+        tab_layout.setContentsMargins(0,0,0,0)
+        tab_layout.setSpacing(10)
+        
+        self.tabs = []
+        for name in ["Daily Overview", "Trends", "Timeline"]:
+            btn = QPushButton(name)
+            btn.setCheckable(True)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFixedHeight(40)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    color: #94A3B8;
+                    border: none;
+                    border-bottom: 2px solid transparent;
+                    font-weight: 600;
+                    font-size: 14px;
+                    padding: 0 15px;
+                }
+                QPushButton:hover {
+                    color: #CDD6F4;
+                }
+                QPushButton:checked {
+                    color: #6366F1;
+                    border-bottom: 2px solid #6366F1;
+                }
+            """)
+            tab_layout.addWidget(btn)
+            self.tabs.append(btn)
+        
+        self.tabs[0].setChecked(True)
+        self.tabs[0].clicked.connect(lambda: self.switch_tab(0))
+        self.tabs[1].clicked.connect(lambda: self.switch_tab(1))
+        self.tabs[2].clicked.connect(lambda: self.switch_tab(2))
+        tab_layout.addStretch()
+        layout.addWidget(tab_container)
+
+        # Content Stack
+        self.stack = QStackedWidget()
+        
+        # Overview Tab
+        self.overview_tab = QWidget()
+        ov_layout = QHBoxLayout(self.overview_tab)
+        ov_layout.setContentsMargins(0,0,0,0)
+        
+        self.bar_chart = QChart()
+        self.bar_chart.setBackgroundBrush(QColor(0,0,0,0))
+        self.bar_chart.legend().setLabelColor(QColor("#CDD6F4"))
+        self.bar_view = QChartView(self.bar_chart)
+        self.bar_view.setRenderHint(QPainter.Antialiasing)
+        
+        self.pie_chart = QChart()
+        self.pie_chart.setBackgroundBrush(QColor(0,0,0,0))
+        self.pie_chart.legend().setLabelColor(QColor("#CDD6F4"))
+        self.pie_view = QChartView(self.pie_chart)
+        self.pie_view.setRenderHint(QPainter.Antialiasing)
+        
+        ov_layout.addWidget(self.bar_view, 3)
+        ov_layout.addWidget(self.pie_view, 2)
+        
+        # Trends Tab
+        self.trends_tab = QWidget()
+        tr_layout = QVBoxLayout(self.trends_tab)
+        self.line_chart = QChart()
+        self.line_chart.setBackgroundBrush(QColor(0,0,0,0))
+        self.line_chart.legend().setLabelColor(QColor("#CDD6F4"))
+        self.line_view = QChartView(self.line_chart)
+        self.line_view.setRenderHint(QPainter.Antialiasing)
+        tr_layout.addWidget(self.line_view)
+        
+        # Timeline Tab
+        self.timeline_widget = TimelineWidget()
+        
+        self.stack.addWidget(self.overview_tab)
+        self.stack.addWidget(self.trends_tab)
+        self.stack.addWidget(self.timeline_widget)
+        
+        layout.addWidget(self.stack)
+
+        # Animation setup
+        self.opacity_effect = QGraphicsOpacityEffect(self.stack)
+        self.stack.setGraphicsEffect(self.opacity_effect)
+        self.anim = QPropertyAnimation(self.opacity_effect, b"opacity")
+        self.anim.setDuration(300)
+        self.anim.setEasingCurve(QEasingCurve.OutCubic)
+
+    def switch_tab(self, index):
+        if self.stack.currentIndex() == index: return
+        
+        self.anim.stop()
+        self.anim.setStartValue(0.0)
+        self.anim.setEndValue(1.0)
+        
+        for i, btn in enumerate(self.tabs):
+            btn.setChecked(i == index)
+        
+        self.stack.setCurrentIndex(index)
+        self.refresh_data()
+        self.anim.start()
+
+    def show_calendar(self):
+        menu = QMenu(self)
+        calendar = QCalendarWidget()
+        calendar.setSelectedDate(self.selected_date)
+        calendar.setGridVisible(False)
+        calendar.setStyleSheet("""
+            QCalendarWidget QWidget { background-color: #1E2430; color: #CDD6F4; }
+            QCalendarWidget QToolButton { color: white; background-color: #2D3748; border-radius: 5px; margin: 5px; }
+            QCalendarWidget QAbstractItemView:enabled { color: #CDD6F4; selection-background-color: #6366F1; selection-color: white; }
+            QCalendarWidget QAbstractItemView:disabled { color: #4B5563; }
+        """)
+        
+        action = QWidgetAction(menu)
+        action.setDefaultWidget(calendar)
+        menu.addAction(action)
+        
+        calendar.clicked.connect(lambda d: self.set_date(d, menu))
+        menu.exec(self.date_btn.mapToGlobal(self.date_btn.rect().bottomLeft()))
+
+    def set_date(self, date, menu):
+        self.selected_date = date
+        self.date_btn.setText(date.toString("MMM dd, yyyy"))
+        menu.close()
+        self.refresh_data()
+
+    def refresh_data(self):
+        date_iso = self.selected_date.toPython().isoformat()
+        idx = self.stack.currentIndex()
+        
+        if idx == 0:
+            usage = database.get_usage_for_date(date_iso)
+            self.update_overview(usage)
+        elif idx == 1:
+            history = database.get_device_activity_history(7)
+            self.update_trends(history)
+        elif idx == 2:
+            sessions = database.get_sessions_for_date(date_iso)
+            self.timeline_widget.set_data(sessions, self.selected_date)
+
+    def update_overview(self, usage):
+        if not usage:
+            self.bar_chart.removeAllSeries()
+            self.pie_chart.removeAllSeries()
+            return
+
+        sorted_usage = sorted(usage.items(), key=lambda x: x[1], reverse=True)[:7]
+        app_names = [app[:-4].title() if app.lower().endswith('.exe') else app.title() for app, sec in sorted_usage]
+        
+        # Check if we can update in-place to prevent legend flicker
+        current_series = self.bar_chart.series()
+        can_update = len(current_series) == len(sorted_usage) and len(self.pie_chart.series()) > 0
+        
+        colors = ["#89b4fa", "#f38ba8", "#a6e3a1", "#f9e2af", "#cba6f7", "#89dceb", "#fab387"]
+
+        if can_update:
+            # Update Bar Chart values
+            max_val = 0
+            for i, (app, sec) in enumerate(sorted_usage):
+                val = sec / 60.0
+                if val > max_val: max_val = val
+                bset = current_series[i].barSets()[0]
+                for j in range(len(sorted_usage)):
+                    bset.replace(j, val if i == j else 0)
+            
+            if self.bar_chart.axes(Qt.Vertical):
+                self.bar_chart.axes(Qt.Vertical)[0].setRange(0, max(1, max_val * 1.2))
+            
+            # Update Pie Chart values
+            pie_series = self.pie_chart.series()[0]
+            for i, (app, sec) in enumerate(sorted_usage[:5]):
+                if i < len(pie_series.slices()):
+                    pie_series.slices()[i].setValue(sec)
+        else:
+            self.bar_chart.removeAllSeries()
+            for ax in self.bar_chart.axes(): self.bar_chart.removeAxis(ax)
+            self.pie_chart.removeAllSeries()
+
+            series_group = []
+            max_val = 0
+            for i, (app, sec) in enumerate(sorted_usage):
+                val = sec / 60.0
+                if val > max_val: max_val = val
+                bset = QBarSet(app_names[i])
+                for j in range(len(sorted_usage)):
+                    bset.append(val if i == j else 0)
+                bset.setColor(QColor(colors[i % len(colors)]))
+                bset.setBorderColor(Qt.transparent)
+                
+                s = QStackedBarSeries()
+                s.append(bset)
+                self.bar_chart.addSeries(s)
+                series_group.append(s)
+            
+            self.bar_chart.setMargins(QMargins(15, 10, 15, 45))
+            axis_x = QBarCategoryAxis()
+            axis_x.append(app_names)
+            axis_x.setLabelsColor(QColor("#CDD6F4"))
+            axis_x.setLabelsAngle(-45)
+            axis_x.setGridLineVisible(False)
+            self.bar_chart.addAxis(axis_x, Qt.AlignBottom)
+            for s in series_group: s.attachAxis(axis_x)
+            
+            axis_y = QValueAxis()
+            axis_y.setRange(0, max(1, max_val * 1.2))
+            axis_y.setTickCount(6)
+            axis_y.setLabelFormat("%d m")
+            axis_y.setLabelsColor(QColor("#CDD6F4"))
+            axis_y.setGridLineColor(QColor(255, 255, 255, 20))
+            self.bar_chart.addAxis(axis_y, Qt.AlignLeft)
+            for s in series_group: s.attachAxis(axis_y)
+
+            pie_series = QPieSeries()
+            pie_series.setHoleSize(0.35) 
+            for i, (app, sec) in enumerate(sorted_usage[:5]):
+                slice = pie_series.append(app_names[i], sec)
+                slice.setBrush(QColor(colors[i % len(colors)]))
+                slice.setLabelVisible(True) 
+                slice.setLabelColor(QColor("#CDD6F4"))
+                slice.setBorderWidth(0)
+            self.pie_chart.addSeries(pie_series)
+            self.pie_chart.legend().setAlignment(Qt.AlignBottom)
+
+    def update_trends(self, history):
+        self.line_chart.removeAllSeries()
+        for ax in self.line_chart.axes(): self.line_chart.removeAxis(ax)
+        
+        if not history: return
+        
+        series = QLineSeries()
+        series.setName("Total Daily Activity")
+        pen = QPen(QColor("#6366F1"), 4)
+        series.setPen(pen)
+        series.setPointsVisible(True)
+        series.setPointLabelsVisible(False)
+        
+        dates = sorted(history.keys())
+        categories = []
+        max_val = 0
+        for i, d in enumerate(dates):
+            val = history[d] / 60.0
+            series.append(i, val)
+            categories.append(d[5:]) # MM-DD
+            if val > max_val: max_val = val
+            
+        self.line_chart.addSeries(series)
+        
+        axis_x = QBarCategoryAxis()
+        axis_x.append(categories)
+        axis_x.setLabelsColor(QColor("#CDD6F4"))
+        axis_x.setGridLineVisible(False)
+        self.line_chart.addAxis(axis_x, Qt.AlignBottom)
+        series.attachAxis(axis_x)
+        
+        axis_y = QValueAxis()
+        axis_y.setRange(0, max(1, max_val * 1.2))
+        axis_y.setTickCount(6)
+        axis_y.setLabelFormat("%d m")
+        axis_y.setLabelsColor(QColor("#CDD6F4"))
+        axis_y.setGridLineColor(QColor(255, 255, 255, 20))
+        self.line_chart.addAxis(axis_y, Qt.AlignLeft)
+        series.attachAxis(axis_y)
 
 class DashboardWindow(QWidget):
     def __init__(self):
@@ -969,7 +1390,7 @@ class DashboardWindow(QWidget):
         self.stacked_widget = QStackedWidget()
         
         self.summary_view = SummaryView()
-        self.stats_view = QWidget() # Placeholder for stats view
+        self.stats_view = AnalyticsView()
         self.apps_view = QListWidget()
         self.settings_view = SettingsView()
         self.settings_view.apps_changed.connect(self.load_data)
@@ -990,53 +1411,16 @@ class DashboardWindow(QWidget):
         self.sidebar.btn_apps.clicked.connect(lambda: self.switch_view(2))
         self.sidebar.btn_settings.clicked.connect(lambda: self.switch_view(3))
         
-        # Initialize Stats View Components
-        self.setup_stats_view()
-
         # Initial View
         self.switch_view(0)
 
-    def setup_stats_view(self):
-        stats_layout = QVBoxLayout(self.stats_view)
-        stats_layout.setContentsMargins(20, 0, 20, 20)
-        
-        header = QLabel("Usage Statistics")
-        header.setStyleSheet("font-size: 24px; font-weight: bold; color: #f5e0dc; margin-bottom: 10px;")
-        stats_layout.addWidget(header)
-
-        # Charts Stack
-        self.charts_stack = QStackedWidget()
-        
-        self.bar_chart = QChart()
-        self.bar_chart.setBackgroundBrush(QColor(0, 0, 0, 0))
-        self.bar_view = QChartView(self.bar_chart)
-        self.bar_view.setRenderHint(QPainter.Antialiasing)
-        
-        self.pie_chart = QChart()
-        self.pie_chart.setBackgroundBrush(QColor(0, 0, 0, 0))
-        self.pie_view = QChartView(self.pie_chart)
-        self.pie_view.setRenderHint(QPainter.Antialiasing)
-        
-        self.charts_stack.addWidget(self.bar_view)
-        self.charts_stack.addWidget(self.pie_view)
-        
-        stats_layout.addWidget(self.charts_stack)
-        
-        # Toggle for charts
-        toggle_layout = QHBoxLayout()
-        self.btn_bar = QPushButton("Bar Chart")
-        self.btn_pie = QPushButton("Pie Chart")
-        self.btn_bar.clicked.connect(lambda: self.charts_stack.setCurrentIndex(0))
-        self.btn_pie.clicked.connect(lambda: self.charts_stack.setCurrentIndex(1))
-        toggle_layout.addStretch()
-        toggle_layout.addWidget(self.btn_bar)
-        toggle_layout.addWidget(self.btn_pie)
-        stats_layout.addLayout(toggle_layout)
 
     def switch_view(self, index):
         self.stacked_widget.setCurrentIndex(index)
         self.sidebar.set_active_button(index)
-        if index == 3:
+        if index == 1:
+            self.stats_view.refresh_data()
+        elif index == 3:
             self.settings_view.load_tracked_apps()
             self.settings_view.search_input.setFocus()
         self.load_data()
@@ -1120,40 +1504,11 @@ class DashboardWindow(QWidget):
             if exe_path and os.path.exists(exe_path):
                 item.setIcon(icon_provider.icon(QFileInfo(exe_path)))
             self.apps_view.addItem(item)
+        
+        # If stats view is visible, refresh it too
+        if self.stacked_widget.currentIndex() == 1:
+            self.stats_view.refresh_data()
 
-        # Update Charts (reuse existing logic but simplified for new theme)
-        self.update_charts(cleaned_data, app_paths, icon_provider)
-
-    def update_charts(self, cleaned_data, app_paths, icon_provider):
-        # Bar Chart
-        self.bar_chart.removeAllSeries()
-        for ax in self.bar_chart.axes(): self.bar_chart.removeAxis(ax)
-        
-        bar_series = QStackedBarSeries()
-        colors = ["#89b4fa", "#f38ba8", "#a6e3a1", "#f9e2af", "#cba6f7", "#89dceb", "#fab387"]
-        
-        categories = [friendly_name for app, friendly_name, seconds in cleaned_data[:7]]
-        for i, (app, friendly_name, seconds) in enumerate(cleaned_data[:7]):
-            bar_set = QBarSet(friendly_name)
-            for _ in range(i): bar_set.append(0)
-            bar_set.append(seconds / 60)
-            for _ in range(len(categories) - i - 1): bar_set.append(0)
-            bar_set.setColor(QColor(colors[i % len(colors)]))
-            bar_series.append(bar_set)
-            
-        self.bar_chart.addSeries(bar_series)
-        self.bar_chart.legend().setLabelColor(QColor("#cdd6f4"))
-        
-        # Pie Chart
-        self.pie_chart.removeAllSeries()
-        pie_series = QPieSeries()
-        for i, (app, friendly_name, seconds) in enumerate(cleaned_data[:5]):
-            slice = pie_series.append(friendly_name, seconds)
-            slice.setBrush(QColor(colors[i % len(colors)]))
-            slice.setLabelVisible(True)
-            slice.setLabelColor(QColor("#cdd6f4"))
-        self.pie_chart.addSeries(pie_series)
-        self.pie_chart.legend().setLabelColor(QColor("#cdd6f4"))
 
     def refresh(self):
         self.load_data()
