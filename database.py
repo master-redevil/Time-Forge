@@ -3,7 +3,20 @@ import datetime
 import os
 import threading
 
-DB_NAME = "usage.db"
+DB_DIR = os.path.join(os.environ.get('LOCALAPPDATA', '.'), 'TimeForge')
+DB_NAME = os.path.join(DB_DIR, 'usage.db')
+
+def _migrate_existing_db():
+    """Moves usage.db from the current directory to the app data directory if it exists."""
+    legacy_path = "usage.db"
+    if os.path.exists(legacy_path) and not os.path.exists(DB_NAME):
+        os.makedirs(DB_DIR, exist_ok=True)
+        try:
+            import shutil
+            shutil.move(legacy_path, DB_NAME)
+            print(f"Migrated database from {legacy_path} to {DB_NAME}")
+        except Exception as e:
+            print(f"Failed to migrate database: {e}")
 
 # Thread-local storage for database connections to avoid overhead
 _local = threading.local()
@@ -25,6 +38,9 @@ def get_connection():
     return conn
 
 def init_db():
+    _migrate_existing_db()
+    os.makedirs(DB_DIR, exist_ok=True)
+    
     conn = get_connection()
     cursor = conn.cursor()
     # Table to store which apps we are tracking
