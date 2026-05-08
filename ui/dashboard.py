@@ -13,6 +13,7 @@ from PySide6.QtCharts import (
 import database
 import os
 import psutil
+import time
 import ctypes
 from ctypes import wintypes
 import datetime
@@ -1285,6 +1286,8 @@ class DashboardWindow(QWidget):
             
         self.resize(1000, 650)
         self.center_on_screen()
+        # P1.3: Track last refresh to throttle high-frequency updates
+        self.last_refresh_time = 0
 
     def center_on_screen(self):
         # use availableGeometry to exclude taskbar area
@@ -1570,7 +1573,19 @@ class DashboardWindow(QWidget):
             self.stats_view.refresh_data()
 
 
-    def refresh(self):
+    def refresh(self, force=False):
+        # P1.3: Skip refresh if the window is not visible to save CPU and DB resources
+        # unless it is a 'forced' refresh (e.g. when opening from tray)
+        if not self.isVisible() and not force:
+            return
+            
+        # P1.3: Throttle UI refreshes to 1 second unless forced
+        # This allows real-time updates as requested by the user
+        now = time.time()
+        if not force and now - self.last_refresh_time < 1:
+            return
+            
+        self.last_refresh_time = now
         self.load_data()
 
     def update_idle_status(self, is_idle):

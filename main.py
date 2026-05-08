@@ -74,8 +74,8 @@ class AppController(QObject):
         if self.dashboard_window.isVisible():
             self.dashboard_window.hide()
         else:
-            self.dashboard_window.refresh()
             self.dashboard_window.show()
+            self.dashboard_window.refresh(force=True)
             self.dashboard_window.activateWindow()
 
     def quit_app(self):
