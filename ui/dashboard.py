@@ -1002,12 +1002,25 @@ class AnalyticsView(QWidget):
         
         self.pie_chart = QChart()
         self.pie_chart.setBackgroundBrush(QColor(0,0,0,0))
-        self.pie_chart.legend().setLabelColor(QColor("#CDD6F4"))
+        self.pie_chart.legend().setVisible(False) # Use custom legend
         self.pie_view = QChartView(self.pie_chart)
         self.pie_view.setRenderHint(QPainter.Antialiasing)
         
+        # Custom Legend Widget
+        self.legend_widget = QWidget()
+        self.legend_layout = QGridLayout(self.legend_widget)
+        self.legend_layout.setContentsMargins(10, 0, 10, 0)
+        self.legend_layout.setHorizontalSpacing(15)
+        self.legend_layout.setVerticalSpacing(2)
+        self.legend_layout.setColumnStretch(0, 1)
+        self.legend_layout.setColumnStretch(1, 1)
+        
+        pie_container = QVBoxLayout()
+        pie_container.addWidget(self.pie_view, 1)
+        pie_container.addWidget(self.legend_widget)
+        
         ov_layout.addWidget(self.bar_view, 3)
-        ov_layout.addWidget(self.pie_view, 2)
+        ov_layout.addLayout(pie_container, 2)
         
         # Trends Tab
         self.trends_tab = QWidget()
@@ -1097,20 +1110,31 @@ class AnalyticsView(QWidget):
         sorted_usage = sorted(usage.items(), key=lambda x: x[1], reverse=True)[:7]
         app_names = [app[:-4].title() if app.lower().endswith('.exe') else app.title() for app, sec in sorted_usage]
         
-        # Check if we can update in-place to prevent legend flicker
+        # Determine optimal bar width based on data volume
+        count = len(sorted_usage)
+        if count <= 2: bar_width = 0.75
+        elif count <= 4: bar_width = 0.6
+        elif count <= 5: bar_width = 0.45
+        else: bar_width = 0.35 # "Thinner only when full"
+
+        # Check if we can update in-place to prevent layout flicker
         current_series = self.bar_chart.series()
-        can_update = len(current_series) == len(sorted_usage) and len(self.pie_chart.series()) > 0
+        can_update = (len(current_series) == 1 and 
+                     isinstance(current_series[0], QStackedBarSeries) and 
+                     current_series[0].count() == count and
+                     len(self.pie_chart.series()) > 0)
         
         colors = ["#89b4fa", "#f38ba8", "#a6e3a1", "#f9e2af", "#cba6f7", "#89dceb", "#fab387"]
 
         if can_update:
-            # Update Bar Chart values
+            series = current_series[0]
+            series.setBarWidth(bar_width)
             max_val = 0
             for i, (app, sec) in enumerate(sorted_usage):
                 val = sec / 60.0
                 if val > max_val: max_val = val
-                bset = current_series[i].barSets()[0]
-                for j in range(len(sorted_usage)):
+                bset = series.barSets()[i]
+                for j in range(count):
                     bset.replace(j, val if i == j else 0)
             
             if self.bar_chart.axes(Qt.Vertical):
@@ -1121,35 +1145,41 @@ class AnalyticsView(QWidget):
             for i, (app, sec) in enumerate(sorted_usage[:5]):
                 if i < len(pie_series.slices()):
                     pie_series.slices()[i].setValue(sec)
+            
+            self.update_custom_legend(sorted_usage[:5], colors)
         else:
             self.bar_chart.removeAllSeries()
             for ax in self.bar_chart.axes(): self.bar_chart.removeAxis(ax)
             self.pie_chart.removeAllSeries()
 
-            series_group = []
+            # Using a single QStackedBarSeries allows bars to fill the category slots properly
+            main_series = QStackedBarSeries()
+            main_series.setBarWidth(bar_width)
+            
             max_val = 0
             for i, (app, sec) in enumerate(sorted_usage):
                 val = sec / 60.0
                 if val > max_val: max_val = val
                 bset = QBarSet(app_names[i])
-                for j in range(len(sorted_usage)):
+                for j in range(count):
                     bset.append(val if i == j else 0)
                 bset.setColor(QColor(colors[i % len(colors)]))
                 bset.setBorderColor(Qt.transparent)
-                
-                s = QStackedBarSeries()
-                s.append(bset)
-                self.bar_chart.addSeries(s)
-                series_group.append(s)
+                main_series.append(bset)
             
+            self.bar_chart.addSeries(main_series)
             self.bar_chart.setMargins(QMargins(15, 10, 15, 45))
+            
             axis_x = QBarCategoryAxis()
             axis_x.append(app_names)
             axis_x.setLabelsColor(QColor("#CDD6F4"))
             axis_x.setLabelsAngle(-45)
+            font = axis_x.labelsFont()
+            font.setPointSize(8)
+            axis_x.setLabelsFont(font)
             axis_x.setGridLineVisible(False)
             self.bar_chart.addAxis(axis_x, Qt.AlignBottom)
-            for s in series_group: s.attachAxis(axis_x)
+            main_series.attachAxis(axis_x)
             
             axis_y = QValueAxis()
             axis_y.setRange(0, max(1, max_val * 1.2))
@@ -1158,18 +1188,48 @@ class AnalyticsView(QWidget):
             axis_y.setLabelsColor(QColor("#CDD6F4"))
             axis_y.setGridLineColor(QColor(255, 255, 255, 20))
             self.bar_chart.addAxis(axis_y, Qt.AlignLeft)
-            for s in series_group: s.attachAxis(axis_y)
+            main_series.attachAxis(axis_y)
 
             pie_series = QPieSeries()
-            pie_series.setHoleSize(0.35) 
+            pie_series.setHoleSize(0.45) 
             for i, (app, sec) in enumerate(sorted_usage[:5]):
                 slice = pie_series.append(app_names[i], sec)
                 slice.setBrush(QColor(colors[i % len(colors)]))
-                slice.setLabelVisible(True) 
-                slice.setLabelColor(QColor("#CDD6F4"))
+                slice.setLabelVisible(False) 
                 slice.setBorderWidth(0)
             self.pie_chart.addSeries(pie_series)
-            self.pie_chart.legend().setAlignment(Qt.AlignBottom)
+            self.update_custom_legend(sorted_usage[:5], colors)
+
+    def update_custom_legend(self, usage_subset, colors):
+        # Correctly clear existing legend widgets
+        while self.legend_layout.count():
+            item = self.legend_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+            
+        for i, (app, sec) in enumerate(usage_subset):
+            name = app[:-4].title() if app.lower().endswith('.exe') else app.title()
+            
+            # Wrap each legend item in a QWidget for easier cleanup and layout
+            item_widget = QWidget()
+            row = QHBoxLayout(item_widget)
+            row.setContentsMargins(5, 4, 5, 4)
+            row.setSpacing(10)
+            
+            dot = QLabel()
+            dot.setFixedSize(12, 12)
+            dot.setStyleSheet(f"background-color: {colors[i % len(colors)]}; border-radius: 6px;")
+            
+            label = QLabel(name)
+            label.setStyleSheet("color: #CDD6F4; font-size: 12px; font-weight: 600;")
+            label.setWordWrap(True)
+            
+            row.addWidget(dot)
+            row.addWidget(label)
+            row.addStretch()
+            
+            self.legend_layout.addWidget(item_widget, i // 2, i % 2)
 
     def update_trends(self, history):
         self.line_chart.removeAllSeries()
