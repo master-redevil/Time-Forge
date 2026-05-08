@@ -104,16 +104,6 @@ class WindowButton(QPushButton):
             painter.drawLine(cx - s, cy - s, cx + s, cy + s)
             painter.drawLine(cx - s, cy + s, cx + s, cy - s)
 
-def get_foreground_app():
-    hwnd = ctypes.windll.user32.GetForegroundWindow()
-    pid = wintypes.DWORD()
-    ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-    try:
-        proc = psutil.Process(pid.value)
-        return proc.name().lower()
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        return None
-
 def format_time(seconds):
     hours = seconds // 3600
     minutes = (seconds % 3600) // 60
@@ -1275,6 +1265,8 @@ class AnalyticsView(QWidget):
 class DashboardWindow(QWidget):
     def __init__(self):
         super().__init__()
+        # P1.5: Cache the focused app name from the tracker signal to avoid UI-thread psutil calls
+        self.current_focused_app = ""
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
         
@@ -1550,7 +1542,7 @@ class DashboardWindow(QWidget):
             self.summary_view.recent_list.addItem("No data recorded yet.")
 
         # Update Session Card (Focused App only)
-        focused = get_foreground_app()
+        focused = self.current_focused_app
         session_time = active_sessions.get(focused, 0)
         self.summary_view.session_card.value_label.setText(format_time(session_time))
 
@@ -1573,7 +1565,11 @@ class DashboardWindow(QWidget):
             self.stats_view.refresh_data()
 
 
-    def refresh(self, force=False):
+    def refresh(self, focused_app=None, force=False):
+        # P1.5: Update cached focused app if provided by the signal
+        if focused_app is not None:
+            self.current_focused_app = focused_app
+            
         # P1.3: Skip refresh if the window is not visible to save CPU and DB resources
         # unless it is a 'forced' refresh (e.g. when opening from tray)
         if not self.isVisible() and not force:

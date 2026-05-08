@@ -40,8 +40,8 @@ def get_foreground_app():
         return None
 
 class TrackerDaemon(QThread):
-    # Signal emitted when database is updated, so the UI can refresh if open
-    updated = Signal()
+    # Signal emitted when database is updated, passing the focused app name
+    updated = Signal(str)
     idle_status_changed = Signal(bool)
 
     def __init__(self, poll_interval=1):
@@ -133,8 +133,8 @@ class TrackerDaemon(QThread):
                         database.end_session(app)
                         self.active_apps.remove(app)
             
-            if updated_any:
-                self.updated.emit()
+            # P1.5: Always emit status update to keep UI in sync without psutil duplication
+            self.updated.emit(focused_app or "")
             
             time.sleep(self.poll_interval)
 
