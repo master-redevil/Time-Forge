@@ -9,6 +9,26 @@ import database
 from tracker import TrackerDaemon
 from ui.dashboard import DashboardWindow
 
+# Setup logging
+import logging
+from logging.handlers import RotatingFileHandler
+import os
+
+log_dir = os.path.join(os.environ.get('LOCALAPPDATA', '.'), 'TimeForge')
+os.makedirs(log_dir, exist_ok=True)
+log_path = os.path.join(log_dir, 'time_forge.log')
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    handlers=[
+        RotatingFileHandler(log_path, maxBytes=5*1024*1024, backupCount=3),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("TimeForge")
+logger.info("Application starting...")
+
 class NativeHotkeyFilter(QAbstractNativeEventFilter):
     def __init__(self, hotkey_id, signal):
         super().__init__()
@@ -41,6 +61,7 @@ class AppController(QObject):
         self.tracker = TrackerDaemon(poll_interval=1)
         self.tracker.updated.connect(self.dashboard_window.refresh)
         self.tracker.idle_status_changed.connect(self.dashboard_window.update_idle_status)
+        self.tracker.error_occurred.connect(self.handle_tracker_error)
         self.tracker.start()
 
         self.setup_tray()
@@ -96,6 +117,11 @@ class AppController(QObject):
     def tray_activated(self, reason):
         if reason == QSystemTrayIcon.Trigger or reason == QSystemTrayIcon.DoubleClick:
             self.toggle_dashboard()
+
+    @Slot(str)
+    def handle_tracker_error(self, message):
+        logger.error(f"Tracker reported error: {message}")
+        self.dashboard_window.show_tracker_error(message)
 
     @Slot()
     def toggle_dashboard(self):

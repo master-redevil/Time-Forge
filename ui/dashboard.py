@@ -284,6 +284,16 @@ class StatusCard(QFrame):
             self.pulse_anim.stop()
             self.pulse_effect.setOpacity(1.0)
 
+    def set_error(self, message):
+        color = "#EF4444" # Red
+        self.dot.setStyleSheet(f"background-color: {color}; border-radius: 5px;")
+        self.accent_bar.setStyleSheet(f"background-color: {color}; border-radius: 1.5px;")
+        self.title.setText("Tracking Error")
+        self.title.setStyleSheet(f"color: {color}; font-size: 14px; font-weight: 800; background: transparent;")
+        self.subtitle.setText(message[:40] + "..." if len(message) > 40 else message)
+        self.pulse_anim.stop()
+        self.pulse_effect.setOpacity(1.0)
+
 class Sidebar(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1566,17 +1576,15 @@ class DashboardWindow(QWidget):
 
 
     def refresh(self, focused_app=None, force=False):
-        # P1.5: Update cached focused app if provided by the signal
         if focused_app is not None:
             self.current_focused_app = focused_app
             
-        # P1.3: Skip refresh if the window is not visible to save CPU and DB resources
-        # unless it is a 'forced' refresh (e.g. when opening from tray)
         if not self.isVisible() and not force:
             return
             
-        # P1.3: Throttle UI refreshes to 1 second unless forced
-        # This allows real-time updates as requested by the user
+        if self.sidebar.status_card.title.text() == "Tracking Error":
+            self.sidebar.status_card.set_active(True, self.app_start_time)
+            
         now = time.time()
         if not force and now - self.last_refresh_time < 1:
             return
@@ -1586,3 +1594,6 @@ class DashboardWindow(QWidget):
 
     def update_idle_status(self, is_idle):
         self.sidebar.status_card.set_active(not is_idle, self.app_start_time)
+
+    def show_tracker_error(self, message):
+        self.sidebar.status_card.set_error(message)
