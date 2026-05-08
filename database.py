@@ -1,11 +1,28 @@
 import sqlite3
 import datetime
 import os
+import threading
 
 DB_NAME = "usage.db"
 
+# Thread-local storage for database connections to avoid overhead
+_local = threading.local()
+
 def get_connection():
-    return sqlite3.connect(DB_NAME)
+    # Return existing connection for this thread if available
+    if hasattr(_local, "conn") and _local.conn is not None:
+        return _local.conn
+        
+    # Create new connection for this thread
+    conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+    
+    # Enable WAL (Write-Ahead Logging) for concurrent access and better performance
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA cache_size=-8000") # 8MB cache
+    
+    _local.conn = conn
+    return conn
 
 def init_db():
     conn = get_connection()
@@ -84,14 +101,12 @@ def init_db():
     # Reset any dangling active sessions from previous crashes
     cursor.execute('UPDATE Sessions SET is_active = 0 WHERE is_active = 1')
     conn.commit()
-    conn.close()
 
 def get_tracked_apps():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT app_name FROM TrackedApps')
     apps = [row[0] for row in cursor.fetchall()]
-    conn.close()
     return apps
 
 def add_tracked_app(app_name, exe_path=None):
@@ -106,22 +121,18 @@ def add_tracked_app(app_name, exe_path=None):
         return True
     except sqlite3.IntegrityError:
         return False
-    finally:
-        conn.close()
 
 def update_app_path(app_name, exe_path):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('UPDATE TrackedApps SET exe_path = ? WHERE app_name = ?', (exe_path, app_name.lower()))
     conn.commit()
-    conn.close()
 
 def get_app_paths():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT app_name, exe_path FROM TrackedApps WHERE exe_path IS NOT NULL')
     paths = {row[0]: row[1] for row in cursor.fetchall()}
-    conn.close()
     return paths
 
 def remove_tracked_app(app_name):
@@ -132,7 +143,6 @@ def remove_tracked_app(app_name):
     # End any active sessions for this app
     cursor.execute('UPDATE Sessions SET is_active = 0 WHERE app_name = ? AND is_active = 1', (app_name,))
     conn.commit()
-    conn.close()
 
 def log_usage(app_name, duration_seconds):
     conn = get_connection()
@@ -151,7 +161,6 @@ def log_usage(app_name, duration_seconds):
         cursor.execute('INSERT INTO UsageLogs (app_name, log_date, duration_seconds) VALUES (?, ?, ?)', (app_name, today, duration_seconds))
         
     conn.commit()
-    conn.close()
 
 def get_today_usage():
     return get_usage_for_date(datetime.date.today().isoformat())
@@ -161,7 +170,6 @@ def get_usage_for_date(date_str):
     cursor = conn.cursor()
     cursor.execute('SELECT app_name, duration_seconds FROM UsageLogs WHERE log_date = ?', (date_str,))
     data = {row[0]: row[1] for row in cursor.fetchall()}
-    conn.close()
     return data
 
 def get_usage_history(days=7):
@@ -176,7 +184,6 @@ def get_usage_history(days=7):
         ORDER BY log_date ASC
     ''', (start_date,))
     data = {row[0]: row[1] for row in cursor.fetchall()}
-    conn.close()
     return data
 
 def get_app_usage_history(app_name, days=7):
@@ -190,7 +197,6 @@ def get_app_usage_history(app_name, days=7):
         ORDER BY log_date ASC
     ''', (app_name.lower(), start_date))
     data = {row[0]: row[1] for row in cursor.fetchall()}
-    conn.close()
     return data
 
 def start_session(app_name):
@@ -202,7 +208,6 @@ def start_session(app_name):
     cursor.execute('UPDATE Sessions SET is_active = 0 WHERE app_name = ? AND is_active = 1', (app_name,))
     cursor.execute('INSERT INTO Sessions (app_name, start_date, duration_seconds, is_active) VALUES (?, ?, 0, 1)', (app_name, now))
     conn.commit()
-    conn.close()
 
 def update_session(app_name, duration_seconds):
     conn = get_connection()
@@ -214,7 +219,6 @@ def update_session(app_name, duration_seconds):
         new_duration = row[1] + duration_seconds
         cursor.execute('UPDATE Sessions SET duration_seconds = ? WHERE id = ?', (new_duration, row[0]))
     conn.commit()
-    conn.close()
 
 def end_session(app_name):
     conn = get_connection()
@@ -222,14 +226,12 @@ def end_session(app_name):
     app_name = app_name.lower()
     cursor.execute('UPDATE Sessions SET is_active = 0 WHERE app_name = ? AND is_active = 1', (app_name,))
     conn.commit()
-    conn.close()
 
 def get_active_sessions():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT app_name, MAX(duration_seconds) FROM Sessions WHERE is_active = 1 GROUP BY app_name')
     data = {row[0]: row[1] for row in cursor.fetchall()}
-    conn.close()
     return data
 
 def get_sessions_for_date(date_str):
@@ -244,7 +246,6 @@ def get_sessions_for_date(date_str):
         ORDER BY start_date ASC
     ''', (date_str,))
     data = [{'app': row[0], 'start': row[1], 'duration': row[2]} for row in cursor.fetchall()]
-    conn.close()
     return data
 
 def log_device_activity(duration_seconds):
@@ -257,7 +258,6 @@ def log_device_activity(duration_seconds):
         ON CONFLICT(log_date) DO UPDATE SET duration_seconds = duration_seconds + excluded.duration_seconds
     ''', (today, duration_seconds))
     conn.commit()
-    conn.close()
 
 def get_today_device_activity():
     return get_device_activity_for_date(datetime.date.today().isoformat())
@@ -267,7 +267,6 @@ def get_device_activity_for_date(date_str):
     cursor = conn.cursor()
     cursor.execute('SELECT duration_seconds FROM DeviceActivity WHERE log_date = ?', (date_str,))
     row = cursor.fetchone()
-    conn.close()
     return row[0] if row else 0
 
 def get_device_activity_history(days=7):
@@ -281,5 +280,4 @@ def get_device_activity_history(days=7):
         ORDER BY log_date ASC
     ''', (start_date,))
     data = {row[0]: row[1] for row in cursor.fetchall()}
-    conn.close()
     return data
