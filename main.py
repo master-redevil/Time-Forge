@@ -57,7 +57,7 @@ class AppController(QObject):
         self.dashboard_window = DashboardWindow()
         
         # Connect integrated settings signal
-        self.dashboard_window.settings_view.apps_changed.connect(self.dashboard_window.refresh)
+        self.dashboard_window.manage_view.apps_changed.connect(self.dashboard_window.refresh)
 
         # Start tracking daemon
         self.tracker = TrackerDaemon(poll_interval=config.get("poll_interval", 1))

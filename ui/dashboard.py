@@ -2,7 +2,8 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QStackedWidget, QListWidget, QListWidgetItem, QFileIconProvider, QStyle,
     QFrame, QGridLayout, QScrollArea, QGroupBox, QGraphicsDropShadowEffect, QGraphicsColorizeEffect,
-    QGraphicsOpacityEffect, QApplication, QAbstractItemView, QLineEdit, QCalendarWidget, QMenu, QWidgetAction
+    QGraphicsOpacityEffect, QApplication, QAbstractItemView, QLineEdit, QCalendarWidget, QMenu, QWidgetAction,
+    QSpinBox
 )
 from PySide6.QtCore import Qt, QTimer, QFileInfo, Signal, QSize, QPropertyAnimation, QEasingCurve, QRect, QDateTime, QDate, QMargins
 from PySide6.QtGui import QPainter, QColor, QFont, QIcon, QPixmap, QBrush, QPainterPath, QLinearGradient, QPen
@@ -335,9 +336,10 @@ class Sidebar(QFrame):
         self.btn_home = SidebarButton("Dashboard", os.path.join(base_path, "home.svg"))
         self.btn_stats = SidebarButton("Analytics", os.path.join(base_path, "analytics.svg"))
         self.btn_apps = SidebarButton("Tracked Apps", os.path.join(base_path, "apps.svg"))
+        self.btn_manage = SidebarButton("App Management", os.path.join(base_path, "management.svg"))
         self.btn_settings = SidebarButton("Settings", os.path.join(base_path, "settings.svg"))
 
-        self.buttons = [self.btn_home, self.btn_stats, self.btn_apps, self.btn_settings]
+        self.buttons = [self.btn_home, self.btn_stats, self.btn_apps, self.btn_manage, self.btn_settings]
         for btn in self.buttons:
             layout.addWidget(btn)
         
@@ -614,7 +616,95 @@ class AppListItemWidget(QWidget):
         self.toggle.toggled.connect(lambda checked: self.toggled.emit(self.app_name, checked))
         layout.addWidget(self.toggle)
 
-class SettingsView(QWidget):
+class TrackedAppItemWidget(QWidget):
+    def __init__(self, app_name, friendly_name, total_seconds, session_seconds, is_active, exe_path=None, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(85)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(15, 10, 15, 10)
+        layout.setSpacing(15)
+        
+        # Card background/container
+        self.container = QFrame()
+        self.container.setObjectName("AppCard")
+        self.container.setStyleSheet("""
+            QFrame#AppCard {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #1E2430, stop:1 #161B22);
+                border: 1px solid rgba(255, 255, 255, 0.05);
+                border-radius: 12px;
+            }
+            QFrame#AppCard:hover {
+                background: #252D3A;
+                border-color: #6366F1;
+            }
+        """)
+        card_layout = QHBoxLayout(self.container)
+        card_layout.setContentsMargins(15, 0, 15, 0)
+        card_layout.setSpacing(15)
+        
+        # Icon
+        self.icon_label = QLabel()
+        self.icon_label.setFixedSize(40, 40)
+        self.icon_label.setAlignment(Qt.AlignCenter)
+        if exe_path and os.path.exists(exe_path):
+            file_info = QFileInfo(exe_path)
+            icon = QFileIconProvider().icon(file_info)
+            self.icon_label.setPixmap(icon.pixmap(40, 40))
+        else:
+            self.icon_label.setText("📦")
+            self.icon_label.setStyleSheet("font-size: 24px;")
+        card_layout.addWidget(self.icon_label)
+        
+        # Info Column
+        info_col = QVBoxLayout()
+        info_col.setSpacing(2)
+        info_col.setAlignment(Qt.AlignVCenter)
+        
+        name_row = QHBoxLayout()
+        self.name_label = QLabel(friendly_name)
+        self.name_label.setStyleSheet("color: white; font-weight: bold; font-size: 15px; background: transparent;")
+        name_row.addWidget(self.name_label)
+        
+        if is_active:
+            self.active_badge = QLabel("FOCUSED")
+            self.active_badge.setStyleSheet("""
+                background-color: rgba(16, 185, 129, 0.2);
+                color: #10B981;
+                font-size: 9px;
+                font-weight: 800;
+                padding: 2px 6px;
+                border-radius: 4px;
+                border: 1px solid rgba(16, 185, 129, 0.3);
+            """)
+            name_row.addWidget(self.active_badge)
+        
+        name_row.addStretch()
+        info_col.addLayout(name_row)
+        
+        # Stats row
+        stats_row = QHBoxLayout()
+        total_lbl = QLabel(f"Total: {format_time(total_seconds)}")
+        total_lbl.setStyleSheet("color: #94A3B8; font-size: 12px; background: transparent;")
+        stats_row.addWidget(total_lbl)
+        
+        if session_seconds > 0:
+            sep = QLabel("•")
+            sep.setStyleSheet("color: #45475a; font-size: 12px;")
+            stats_row.addWidget(sep)
+            
+            sess_lbl = QLabel(f"Session: {format_time(session_seconds)}")
+            sess_lbl.setStyleSheet("color: #6366F1; font-size: 12px; font-weight: 600; background: transparent;")
+            stats_row.addWidget(sess_lbl)
+        
+        stats_row.addStretch()
+        info_col.addLayout(stats_row)
+        card_layout.addLayout(info_col)
+        
+        layout.addWidget(self.container)
+
+class AppManagementView(QWidget):
     apps_changed = Signal()
 
     def __init__(self):
@@ -633,13 +723,18 @@ class SettingsView(QWidget):
         # Search Bar
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search applications...")
-        self.search_input.setFixedWidth(250)
+        self.search_input.setFixedWidth(280)
+        
+        icons_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "icons")
+        search_icon = QIcon(os.path.join(icons_path, "search.svg"))
+        self.search_input.addAction(search_icon, QLineEdit.LeadingPosition)
+        
         self.search_input.setStyleSheet("""
             QLineEdit {
                 background-color: #1E2430;
                 border: 1px solid #2D3748;
                 border-radius: 8px;
-                padding: 8px 12px;
+                padding: 8px 8px 8px 35px; /* Increased left padding for icon */
                 color: #CDD6F4;
                 font-size: 13px;
             }
@@ -654,20 +749,23 @@ class SettingsView(QWidget):
         self.btn_refresh = QPushButton()
         self.btn_refresh.setFixedSize(36, 36)
         self.btn_refresh.setCursor(Qt.PointingHandCursor)
+        
+        refresh_icon = QIcon(os.path.join(icons_path, "refresh.svg"))
+        self.btn_refresh.setIcon(refresh_icon)
+        self.btn_refresh.setIconSize(QSize(18, 18))
+        
         self.btn_refresh.setStyleSheet("""
             QPushButton {
                 background-color: #1E2430;
                 border: 1px solid #2D3748;
                 border-radius: 8px;
                 color: #CDD6F4;
-                font-size: 16px;
             }
             QPushButton:hover {
                 background-color: #2D3748;
                 border-color: #6366F1;
             }
         """)
-        self.btn_refresh.setText("🔄")
         self.btn_refresh.clicked.connect(self.refresh_data)
         header_layout.addWidget(self.btn_refresh)
         
@@ -675,19 +773,19 @@ class SettingsView(QWidget):
 
         # App List
         self.app_list = SmoothScrollList()
-        self.app_list.setObjectName("SettingsAppList")
+        self.app_list.setObjectName("AppManagementList")
         self.app_list.setStyleSheet("""
-            QListWidget#SettingsAppList {
+            QListWidget#AppManagementList {
                 background-color: transparent;
                 border: none;
             }
-            QListWidget#SettingsAppList::item {
+            QListWidget#AppManagementList::item {
                 background-color: #1E2430;
                 border-radius: 12px;
                 margin-bottom: 8px;
                 padding: 0px;
             }
-            QListWidget#SettingsAppList::item:hover {
+            QListWidget#AppManagementList::item:hover {
                 background-color: #252D3A;
             }
         """)
@@ -789,6 +887,325 @@ class SettingsView(QWidget):
 
     def load_tracked_apps(self):
         self.refresh_data()
+
+class ModernSpinBox(QSpinBox):
+    def __init__(self, min_val=1, max_val=9999, suffix="", parent=None):
+        super().__init__(parent)
+        self.setRange(min_val, max_val)
+        self.setSuffix(suffix)
+        self.setAlignment(Qt.AlignCenter)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setStyleSheet("""
+            QSpinBox {
+                background-color: #1E2430;
+                border: 2px solid #2D3748;
+                border-radius: 10px;
+                padding: 6px 12px;
+                color: #CDD6F4;
+                font-size: 14px;
+                font-weight: 800;
+                min-width: 100px;
+            }
+            QSpinBox:hover {
+                border-color: #4B5563;
+            }
+            QSpinBox:focus {
+                border-color: #6366F1;
+                background-color: #252D3A;
+            }
+            QSpinBox::up-button, QSpinBox::down-button {
+                width: 0px;
+            }
+        """)
+
+class SettingCard(QFrame):
+    def __init__(self, title, description, icon_path=None, parent=None):
+        super().__init__(parent)
+        self.setObjectName("SettingCard")
+        self.setMinimumHeight(130)
+        
+        # Glassmorphic styling
+        self.setStyleSheet("""
+            QFrame#SettingCard {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #1E2430, stop:1 #161B22);
+                border: 1px solid rgba(255, 255, 255, 0.05);
+                border-radius: 16px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(12)
+
+        # Header Row
+        header = QHBoxLayout()
+        header.setSpacing(12)
+        
+        if icon_path and os.path.exists(icon_path):
+            self.icon_label = QLabel()
+            self.icon_label.setFixedSize(28, 28)
+            pixmap = QIcon(icon_path).pixmap(28, 28)
+            self.icon_label.setPixmap(pixmap)
+            
+            # Colorize icon
+            color_effect = QGraphicsColorizeEffect()
+            color_effect.setColor(QColor("#6366F1"))
+            self.icon_label.setGraphicsEffect(color_effect)
+            header.addWidget(self.icon_label)
+
+        self.title_label = QLabel(title)
+        self.title_label.setStyleSheet("color: #F1F5F9; font-weight: 800; font-size: 15px; background: transparent;")
+        header.addWidget(self.title_label)
+        header.addStretch()
+        
+        # Input Slot
+        self.input_container = QWidget()
+        self.input_layout = QHBoxLayout(self.input_container)
+        self.input_layout.setContentsMargins(0, 0, 0, 0)
+        header.addWidget(self.input_container)
+        layout.addLayout(header)
+
+        # Description
+        self.desc_label = QLabel(description)
+        self.desc_label.setWordWrap(True)
+        self.desc_label.setStyleSheet("color: #94A3B8; font-size: 12px; background: transparent; line-height: 1.5; margin-top: 5px;")
+        layout.addWidget(self.desc_label)
+        layout.addStretch()
+
+        # Hover Effect
+        self._glow = QGraphicsDropShadowEffect(self)
+        self._glow.setBlurRadius(0)
+        self._glow.setColor(QColor("#6366F1"))
+        self._glow.setOffset(0, 0)
+        self.setGraphicsEffect(self._glow)
+
+        self.anim = QPropertyAnimation(self._glow, b"blurRadius")
+        self.anim.setDuration(300)
+        self.anim.setEasingCurve(QEasingCurve.OutCubic)
+
+    def set_input_widget(self, widget):
+        self.input_layout.addWidget(widget)
+
+    def enterEvent(self, event):
+        self.anim.stop()
+        self.anim.setStartValue(self._glow.blurRadius())
+        self.anim.setEndValue(15)
+        self.anim.start()
+        self.setStyleSheet("""
+            QFrame#SettingCard {
+                background: #252D3A;
+                border: 1px solid rgba(99, 102, 241, 0.4);
+                border-radius: 16px;
+            }
+        """)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.anim.stop()
+        self.anim.setStartValue(self._glow.blurRadius())
+        self.anim.setEndValue(0)
+        self.anim.start()
+        self.setStyleSheet("""
+            QFrame#SettingCard {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #1E2430, stop:1 #161B22);
+                border: 1px solid rgba(255, 255, 255, 0.05);
+                border-radius: 16px;
+            }
+        """)
+        super().leaveEvent(event)
+
+class GeneralSettingsView(QWidget):
+    def __init__(self):
+        super().__init__()
+        from config import config
+        self.config = config
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(25, 10, 25, 20)
+        layout.setSpacing(20)
+        
+        # Header Row
+        header_layout = QHBoxLayout()
+        header = QLabel("General Settings")
+        header.setStyleSheet("font-size: 26px; font-weight: bold; color: #f5e0dc;")
+        header_layout.addWidget(header)
+        header_layout.addStretch()
+        
+        self.btn_reset = QPushButton("Reset to Defaults")
+        self.btn_reset.setCursor(Qt.PointingHandCursor)
+        self.btn_reset.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #94A3B8;
+                border: 1px solid #2D3748;
+                border-radius: 8px;
+                padding: 6px 14px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                color: #F43F5E;
+                border-color: #F43F5E;
+                background-color: rgba(244, 63, 94, 0.05);
+            }
+        """)
+        self.btn_reset.clicked.connect(self.reset_to_defaults)
+        header_layout.addWidget(self.btn_reset)
+        layout.addLayout(header_layout)
+        
+        # Scrollable Grid of Cards
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("background: transparent; border: none;")
+        
+        container = QWidget()
+        container.setStyleSheet("background: transparent;")
+        grid_layout = QGridLayout(container)
+        grid_layout.setContentsMargins(0, 5, 0, 10)
+        grid_layout.setSpacing(20)
+        
+        icons_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "icons")
+        
+        # Section: Engine
+        engine_header = QLabel("Tracking Engine")
+        engine_header.setStyleSheet("color: #6366F1; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; margin-top: 10px;")
+        grid_layout.addWidget(engine_header, 0, 0, 1, 2)
+
+        # Poll Interval Card
+        self.card_poll = SettingCard(
+            "Poll Interval", 
+            "Determines how frequently the engine checks for the currently focused application window.",
+            os.path.join(icons_path, "clock.svg")
+        )
+        self.in_poll = ModernSpinBox(1, 60, " s")
+        self.in_poll.setValue(int(self.config.get("poll_interval")))
+        self.card_poll.set_input_widget(self.in_poll)
+        grid_layout.addWidget(self.card_poll, 1, 0)
+
+        # Scan Interval Card
+        self.card_scan = SettingCard(
+            "Scan Interval", 
+            "Frequency of background process scanning to detect application launches and exits.",
+            os.path.join(icons_path, "bolt.svg")
+        )
+        self.in_scan = ModernSpinBox(5, 300, " s")
+        self.in_scan.setValue(int(self.config.get("scan_interval")))
+        self.card_scan.set_input_widget(self.in_scan)
+        grid_layout.addWidget(self.card_scan, 1, 1)
+
+        # Section: Maintenance
+        maintenance_header = QLabel("Maintenance & Retention")
+        maintenance_header.setStyleSheet("color: #6366F1; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; margin-top: 25px;")
+        grid_layout.addWidget(maintenance_header, 2, 0, 1, 2)
+
+        # Idle Threshold Card
+        self.card_idle = SettingCard(
+            "Idle Threshold", 
+            "The duration of inactivity before tracking is automatically paused to prevent over-counting.",
+            os.path.join(icons_path, "settings.svg")
+        )
+        self.in_idle = ModernSpinBox(10, 3600, " s")
+        self.in_idle.setValue(int(self.config.get("idle_threshold")))
+        self.card_idle.set_input_widget(self.in_idle)
+        grid_layout.addWidget(self.card_idle, 3, 0)
+
+        # Data Retention Card
+        self.card_retention = SettingCard(
+            "Data Retention", 
+            "Controls how many days of historical activity data should be kept in the local database.",
+            os.path.join(icons_path, "analytics.svg")
+        )
+        self.in_retention = ModernSpinBox(1, 3650, " days")
+        self.in_retention.setValue(int(self.config.get("data_retention_days")))
+        self.card_retention.set_input_widget(self.in_retention)
+        grid_layout.addWidget(self.card_retention, 3, 1)
+
+        grid_layout.setRowStretch(4, 1)
+        scroll.setWidget(container)
+        layout.addWidget(scroll)
+        
+        # Save Action
+        save_container = QHBoxLayout()
+        save_container.addStretch()
+        
+        self.btn_save = QPushButton("Apply All Changes")
+        self.btn_save.setFixedSize(240, 48)
+        self.btn_save.setCursor(Qt.PointingHandCursor)
+        self.btn_save.setStyleSheet("""
+            QPushButton {
+                background-color: #6366F1;
+                color: white;
+                border: none;
+                border-radius: 12px;
+                font-weight: 900;
+                font-size: 14px;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+            }
+            QPushButton:hover {
+                background-color: #4F46E5;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            QPushButton:pressed {
+                background-color: #4338CA;
+            }
+        """)
+        self.btn_save.clicked.connect(self.save_settings)
+        save_container.addWidget(self.btn_save)
+        save_container.addStretch() # Center it!
+        layout.addLayout(save_container)
+
+    def save_settings(self):
+        try:
+            self.config.set("poll_interval", self.in_poll.value())
+            self.config.set("idle_threshold", self.in_idle.value())
+            self.config.set("scan_interval", self.in_scan.value())
+            self.config.set("data_retention_days", self.in_retention.value())
+            
+            # Visual Feedback
+            orig_text = self.btn_save.text()
+            self.btn_save.setText("✓ Settings Applied")
+            self.btn_save.setStyleSheet("""
+                QPushButton {
+                    background-color: #10B981;
+                    color: white;
+                    border: none;
+                    border-radius: 12px;
+                    font-weight: 800;
+                }
+            """)
+            QTimer.singleShot(2000, lambda: self.reset_save_button(orig_text))
+        except Exception as e:
+            self.btn_save.setText(f"Error: {e}")
+            self.btn_save.setStyleSheet("background-color: #EF4444; color: white; border-radius: 12px;")
+
+    def reset_save_button(self, text):
+        self.btn_save.setText(text)
+        self.btn_save.setStyleSheet("""
+            QPushButton {
+                background-color: #6366F1;
+                color: white;
+                border: none;
+                border-radius: 12px;
+                font-weight: 800;
+                font-size: 14px;
+                letter-spacing: 0.5px;
+            }
+            QPushButton:hover { background-color: #4F46E5; }
+        """)
+
+    def reset_to_defaults(self):
+        from config import Config
+        defaults = Config.DEFAULT_CONFIG
+        self.in_poll.setValue(defaults["poll_interval"])
+        self.in_idle.setValue(defaults["idle_threshold"])
+        self.in_scan.setValue(defaults["scan_interval"])
+        self.in_retention.setValue(defaults["data_retention_days"])
+        
+        # Flash the button to show something happened
+        self.btn_reset.setText("Defaults Restored!")
+        QTimer.singleShot(1500, lambda: self.btn_reset.setText("Reset to Defaults"))
 
 class TimelineWidget(QWidget):
     def __init__(self, parent=None):
@@ -1290,6 +1707,7 @@ class DashboardWindow(QWidget):
         self.center_on_screen()
         # P1.3: Track last refresh to throttle high-frequency updates
         self.last_refresh_time = 0
+        self.drag_pos = None
 
     def center_on_screen(self):
         # use availableGeometry to exclude taskbar area
@@ -1457,12 +1875,22 @@ class DashboardWindow(QWidget):
         self.summary_view = SummaryView()
         self.stats_view = AnalyticsView()
         self.apps_view = QListWidget()
-        self.settings_view = SettingsView()
-        self.settings_view.apps_changed.connect(self.load_data)
+        self.apps_view.setObjectName("TrackedAppsList")
+        self.apps_view.setStyleSheet("""
+            QListWidget#TrackedAppsList { border: none; background: transparent; }
+            QListWidget#TrackedAppsList::item { background: transparent; padding: 0; margin: 0; }
+            QListWidget#TrackedAppsList::item:selected { background: transparent; }
+        """)
+        
+        self.manage_view = AppManagementView()
+        self.manage_view.apps_changed.connect(self.load_data)
+        
+        self.settings_view = GeneralSettingsView()
 
         self.stacked_widget.addWidget(self.summary_view)
         self.stacked_widget.addWidget(self.stats_view)
         self.stacked_widget.addWidget(self.apps_view)
+        self.stacked_widget.addWidget(self.manage_view)
         self.stacked_widget.addWidget(self.settings_view)
 
         self.content_layout.addWidget(self.stacked_widget)
@@ -1474,7 +1902,8 @@ class DashboardWindow(QWidget):
         self.sidebar.btn_home.clicked.connect(lambda: self.switch_view(0))
         self.sidebar.btn_stats.clicked.connect(lambda: self.switch_view(1))
         self.sidebar.btn_apps.clicked.connect(lambda: self.switch_view(2))
-        self.sidebar.btn_settings.clicked.connect(lambda: self.switch_view(3))
+        self.sidebar.btn_manage.clicked.connect(lambda: self.switch_view(3))
+        self.sidebar.btn_settings.clicked.connect(lambda: self.switch_view(4))
         
         # Initial View
         self.switch_view(0)
@@ -1486,8 +1915,8 @@ class DashboardWindow(QWidget):
         if index == 1:
             self.stats_view.refresh_data()
         elif index == 3:
-            self.settings_view.load_tracked_apps()
-            self.settings_view.search_input.setFocus()
+            self.manage_view.load_tracked_apps()
+            self.manage_view.search_input.setFocus()
         self.load_data()
 
     def mousePressEvent(self, event):
@@ -1496,7 +1925,7 @@ class DashboardWindow(QWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if event.buttons() & Qt.LeftButton:
+        if event.buttons() & Qt.LeftButton and self.drag_pos:
             new_pos = event.globalPosition().toPoint()
             diff = new_pos - self.drag_pos
             self.move(self.pos() + diff)
@@ -1556,19 +1985,21 @@ class DashboardWindow(QWidget):
         session_time = active_sessions.get(focused, 0)
         self.summary_view.session_card.value_label.setText(format_time(session_time))
 
-        # Update Apps View (List Widget)
+        # Update Apps View (Styled Cards)
         self.apps_view.clear()
-        self.apps_view.setIconSize(QSize(32, 32))
         for app, friendly_name, seconds in cleaned_data:
-            if app in active_sessions:
-                item_text = f"{friendly_name} | Total: {format_time(seconds)} | Session: {format_time(active_sessions[app])}"
-            else:
-                item_text = f"{friendly_name} | Total: {format_time(seconds)}"
-            item = QListWidgetItem(item_text)
+            item = QListWidgetItem(self.apps_view)
+            item.setSizeHint(QSize(0, 85))
+            
+            session_seconds = active_sessions.get(app, 0)
+            is_active = (app == focused)
             exe_path = app_paths.get(app)
-            if exe_path and os.path.exists(exe_path):
-                item.setIcon(icon_provider.icon(QFileInfo(exe_path)))
+            
+            widget = TrackedAppItemWidget(
+                app, friendly_name, seconds, session_seconds, is_active, exe_path
+            )
             self.apps_view.addItem(item)
+            self.apps_view.setItemWidget(item, widget)
         
         # If stats view is visible, refresh it too
         if self.stacked_widget.currentIndex() == 1:
