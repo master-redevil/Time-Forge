@@ -52,6 +52,7 @@ class AppController(QObject):
     def __init__(self):
         super().__init__()
         database.init_db()
+        database.cleanup_old_data()
 
         self.dashboard_window = DashboardWindow()
         

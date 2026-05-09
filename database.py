@@ -119,6 +119,48 @@ def init_db():
     cursor.execute('UPDATE Sessions SET is_active = 0 WHERE is_active = 1')
     conn.commit()
 
+def cleanup_old_data():
+    """Removes records older than the configured retention period."""
+    retention_days = config.get("data_retention_days", 90)
+    cutoff_date = (datetime.date.today() - datetime.timedelta(days=retention_days)).isoformat()
+    
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Delete from UsageLogs
+        cursor.execute('DELETE FROM UsageLogs WHERE log_date < ?', (cutoff_date,))
+        usage_deleted = cursor.rowcount
+        
+        # Delete from Sessions (start_date is isoformat but we can use date() function in SQL)
+        cursor.execute('DELETE FROM Sessions WHERE date(start_date) < ?', (cutoff_date,))
+        sessions_deleted = cursor.rowcount
+        
+        # Delete from DeviceActivity
+        cursor.execute('DELETE FROM DeviceActivity WHERE log_date < ?', (cutoff_date,))
+        activity_deleted = cursor.rowcount
+        
+        conn.commit()
+        
+        # Reclaim space
+        cursor.execute('VACUUM')
+        
+        import logging
+        logger = logging.getLogger("TimeForge.Database")
+        logger.info(f"Cleanup completed. Deleted {usage_deleted} usage logs, {sessions_deleted} sessions, and {activity_deleted} activity records.")
+        return True
+    except Exception as e:
+        import logging
+        logger = logging.getLogger("TimeForge.Database")
+        logger.error(f"Cleanup failed: {e}")
+        return False
+
+def get_db_size():
+    """Returns the database file size in bytes."""
+    if os.path.exists(DB_NAME):
+        return os.path.getsize(DB_NAME)
+    return 0
+
 def get_tracked_apps():
     conn = get_connection()
     cursor = conn.cursor()
