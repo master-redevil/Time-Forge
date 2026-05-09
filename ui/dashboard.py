@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QPushButton, QStackedWidget, QListWidget, QListWidgetItem, QFileIconProvider, QStyle,
     QFrame, QGridLayout, QScrollArea, QGroupBox, QGraphicsDropShadowEffect, QGraphicsColorizeEffect,
     QGraphicsOpacityEffect, QApplication, QAbstractItemView, QLineEdit, QCalendarWidget, QMenu, QWidgetAction,
-    QSpinBox
+    QSpinBox, QProgressBar
 )
 from PySide6.QtCore import Qt, QTimer, QFileInfo, Signal, QSize, QPropertyAnimation, QEasingCurve, QRect, QDateTime, QDate, QMargins
 from PySide6.QtGui import QPainter, QColor, QFont, QIcon, QPixmap, QBrush, QPainterPath, QLinearGradient, QPen
@@ -617,13 +617,13 @@ class AppListItemWidget(QWidget):
         layout.addWidget(self.toggle)
 
 class TrackedAppItemWidget(QWidget):
-    def __init__(self, app_name, friendly_name, total_seconds, session_seconds, is_active, exe_path=None, parent=None):
+    def __init__(self, app_name, friendly_name, total_seconds, session_seconds, is_active, max_seconds=1, exe_path=None, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(85)
+        self.setMinimumHeight(110)
         
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(15, 10, 15, 10)
-        layout.setSpacing(15)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(0)
         
         # Card background/container
         self.container = QFrame()
@@ -633,76 +633,156 @@ class TrackedAppItemWidget(QWidget):
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
                     stop:0 #1E2430, stop:1 #161B22);
                 border: 1px solid rgba(255, 255, 255, 0.05);
-                border-radius: 12px;
+                border-radius: 14px;
             }
             QFrame#AppCard:hover {
                 background: #252D3A;
                 border-color: #6366F1;
             }
         """)
-        card_layout = QHBoxLayout(self.container)
-        card_layout.setContentsMargins(15, 0, 15, 0)
-        card_layout.setSpacing(15)
+        
+        card_layout = QVBoxLayout(self.container)
+        card_layout.setContentsMargins(15, 12, 15, 12)
+        card_layout.setSpacing(10)
+        
+        # Top Row: Icon + Name + Badge
+        top_row = QHBoxLayout()
+        top_row.setSpacing(12)
         
         # Icon
         self.icon_label = QLabel()
-        self.icon_label.setFixedSize(40, 40)
+        self.icon_label.setFixedSize(32, 32)
         self.icon_label.setAlignment(Qt.AlignCenter)
         if exe_path and os.path.exists(exe_path):
             file_info = QFileInfo(exe_path)
             icon = QFileIconProvider().icon(file_info)
-            self.icon_label.setPixmap(icon.pixmap(40, 40))
+            self.icon_label.setPixmap(icon.pixmap(32, 32))
         else:
             self.icon_label.setText("📦")
-            self.icon_label.setStyleSheet("font-size: 24px;")
-        card_layout.addWidget(self.icon_label)
+            self.icon_label.setStyleSheet("font-size: 20px;")
+        top_row.addWidget(self.icon_label)
         
-        # Info Column
-        info_col = QVBoxLayout()
-        info_col.setSpacing(2)
-        info_col.setAlignment(Qt.AlignVCenter)
+        # Name Info
+        name_col = QVBoxLayout()
+        name_col.setSpacing(0)
         
-        name_row = QHBoxLayout()
         self.name_label = QLabel(friendly_name)
-        self.name_label.setStyleSheet("color: white; font-weight: bold; font-size: 15px; background: transparent;")
-        name_row.addWidget(self.name_label)
+        self.name_label.setStyleSheet("color: white; font-weight: bold; font-size: 14px; background: transparent;")
+        name_col.addWidget(self.name_label)
         
         if is_active:
             self.active_badge = QLabel("FOCUSED")
             self.active_badge.setStyleSheet("""
-                background-color: rgba(16, 185, 129, 0.2);
                 color: #10B981;
                 font-size: 9px;
-                font-weight: 800;
-                padding: 2px 6px;
-                border-radius: 4px;
-                border: 1px solid rgba(16, 185, 129, 0.3);
+                font-weight: 900;
+                background: transparent;
             """)
-            name_row.addWidget(self.active_badge)
+            name_col.addWidget(self.active_badge)
         
-        name_row.addStretch()
-        info_col.addLayout(name_row)
+        top_row.addLayout(name_col)
+        top_row.addStretch()
+        card_layout.addLayout(top_row)
         
-        # Stats row
+        # Stats
         stats_row = QHBoxLayout()
-        total_lbl = QLabel(f"Total: {format_time(total_seconds)}")
-        total_lbl.setStyleSheet("color: #94A3B8; font-size: 12px; background: transparent;")
-        stats_row.addWidget(total_lbl)
+        self.total_lbl = QLabel(format_time(total_seconds))
+        self.total_lbl.setStyleSheet("color: #F1F5F9; font-size: 13px; font-weight: 800; background: transparent;")
+        stats_row.addWidget(self.total_lbl)
         
         if session_seconds > 0:
-            sep = QLabel("•")
-            sep.setStyleSheet("color: #45475a; font-size: 12px;")
-            stats_row.addWidget(sep)
-            
-            sess_lbl = QLabel(f"Session: {format_time(session_seconds)}")
-            sess_lbl.setStyleSheet("color: #6366F1; font-size: 12px; font-weight: 600; background: transparent;")
+            sess_lbl = QLabel(f"• {format_time(session_seconds)} Session")
+            sess_lbl.setStyleSheet("color: #6366F1; font-size: 11px; font-weight: 600; background: transparent;")
             stats_row.addWidget(sess_lbl)
         
         stats_row.addStretch()
-        info_col.addLayout(stats_row)
-        card_layout.addLayout(info_col)
+        card_layout.addLayout(stats_row)
+        
+        # Progress Bar
+        self.progress = QProgressBar()
+        self.progress.setFixedHeight(4)
+        self.progress.setTextVisible(False)
+        self.progress.setRange(0, 100)
+        percentage = int((total_seconds / max_seconds) * 100) if max_seconds > 0 else 0
+        self.progress.setValue(percentage)
+        self.progress.setStyleSheet("""
+            QProgressBar {
+                background-color: rgba(255, 255, 255, 0.05);
+                border: none;
+                border-radius: 2px;
+            }
+            QProgressBar::chunk {
+                background-color: #6366F1;
+                border-radius: 2px;
+            }
+        """)
+        card_layout.addWidget(self.progress)
         
         layout.addWidget(self.container)
+
+class TrackedAppsView(QWidget):
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 10, 20, 20)
+        layout.setSpacing(15)
+        
+        # Header Row
+        header_layout = QHBoxLayout()
+        header = QLabel("Tracked Applications")
+        header.setStyleSheet("font-size: 24px; font-weight: bold; color: #f5e0dc;")
+        header_layout.addWidget(header)
+        header_layout.addStretch()
+        layout.addLayout(header_layout)
+        
+        # Scrollable Grid
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setStyleSheet("background: transparent; border: none;")
+        
+        self.container = QWidget()
+        self.container.setStyleSheet("background: transparent;")
+        self.grid = QGridLayout(self.container)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setSpacing(10)
+        
+        self.scroll.setWidget(self.container)
+        layout.addWidget(self.scroll)
+
+    def update_apps(self, cleaned_data, active_sessions, focused_app, app_paths):
+        # Clear current grid
+        while self.grid.count():
+            child = self.grid.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        
+        if not cleaned_data:
+            empty_lbl = QLabel("No applications are currently being tracked.\nGo to 'App Management' to add some!")
+            empty_lbl.setAlignment(Qt.AlignCenter)
+            empty_lbl.setStyleSheet("color: #94A3B8; font-size: 14px; margin-top: 50px;")
+            self.grid.addWidget(empty_lbl, 0, 0)
+            return
+
+        # Calculate max usage for progress bars
+        max_usage = max([d[2] for d in cleaned_data]) if cleaned_data else 1
+        
+        # Build grid (3 columns)
+        cols = 3
+        for i, (app, friendly_name, seconds) in enumerate(cleaned_data):
+            row = i // cols
+            col = i % cols
+            
+            session_seconds = active_sessions.get(app, 0)
+            is_active = (app == focused_app)
+            exe_path = app_paths.get(app)
+            
+            card = TrackedAppItemWidget(
+                app, friendly_name, seconds, session_seconds, is_active, max_usage, exe_path
+            )
+            self.grid.addWidget(card, row, col)
+        
+        # Add stretch at the bottom
+        self.grid.setRowStretch(self.grid.rowCount(), 1)
 
 class AppManagementView(QWidget):
     apps_changed = Signal()
@@ -1874,13 +1954,7 @@ class DashboardWindow(QWidget):
         
         self.summary_view = SummaryView()
         self.stats_view = AnalyticsView()
-        self.apps_view = QListWidget()
-        self.apps_view.setObjectName("TrackedAppsList")
-        self.apps_view.setStyleSheet("""
-            QListWidget#TrackedAppsList { border: none; background: transparent; }
-            QListWidget#TrackedAppsList::item { background: transparent; padding: 0; margin: 0; }
-            QListWidget#TrackedAppsList::item:selected { background: transparent; }
-        """)
+        self.apps_view = TrackedAppsView()
         
         self.manage_view = AppManagementView()
         self.manage_view.apps_changed.connect(self.load_data)
@@ -1985,21 +2059,8 @@ class DashboardWindow(QWidget):
         session_time = active_sessions.get(focused, 0)
         self.summary_view.session_card.value_label.setText(format_time(session_time))
 
-        # Update Apps View (Styled Cards)
-        self.apps_view.clear()
-        for app, friendly_name, seconds in cleaned_data:
-            item = QListWidgetItem(self.apps_view)
-            item.setSizeHint(QSize(0, 85))
-            
-            session_seconds = active_sessions.get(app, 0)
-            is_active = (app == focused)
-            exe_path = app_paths.get(app)
-            
-            widget = TrackedAppItemWidget(
-                app, friendly_name, seconds, session_seconds, is_active, exe_path
-            )
-            self.apps_view.addItem(item)
-            self.apps_view.setItemWidget(item, widget)
+        # Update Apps View (Premium Grid)
+        self.apps_view.update_apps(cleaned_data, active_sessions, focused, app_paths)
         
         # If stats view is visible, refresh it too
         if self.stacked_widget.currentIndex() == 1:
