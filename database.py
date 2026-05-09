@@ -2,9 +2,10 @@ import sqlite3
 import datetime
 import os
 import threading
+from config import config
 
 DB_DIR = os.path.join(os.environ.get('LOCALAPPDATA', '.'), 'TimeForge')
-DB_NAME = os.path.join(DB_DIR, 'usage.db')
+DB_NAME = os.path.join(DB_DIR, config.get("database_name", "usage.db"))
 
 def _migrate_existing_db():
     """Moves usage.db from the current directory to the app data directory if it exists."""

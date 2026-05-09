@@ -8,6 +8,7 @@ from PySide6.QtCore import QObject, Signal, Slot, Qt, QAbstractNativeEventFilter
 import database
 from tracker import TrackerDaemon
 from ui.dashboard import DashboardWindow
+from config import config
 
 # Setup logging
 import logging
@@ -58,7 +59,7 @@ class AppController(QObject):
         self.dashboard_window.settings_view.apps_changed.connect(self.dashboard_window.refresh)
 
         # Start tracking daemon
-        self.tracker = TrackerDaemon(poll_interval=1)
+        self.tracker = TrackerDaemon(poll_interval=config.get("poll_interval", 1))
         self.tracker.updated.connect(self.dashboard_window.refresh)
         self.tracker.idle_status_changed.connect(self.dashboard_window.update_idle_status)
         self.tracker.error_occurred.connect(self.handle_tracker_error)
@@ -69,17 +70,19 @@ class AppController(QObject):
         # Connect signal for thread-safe UI update from hotkey
         self.show_dashboard_sig.connect(self.toggle_dashboard)
         
-        # P1.4: Native Hotkey Registration (Ctrl+Shift+T)
+        # P1.4: Native Hotkey Registration
         self.HOTKEY_ID = 1
         self.hotkey_filter = NativeHotkeyFilter(self.HOTKEY_ID, self.show_dashboard_sig)
         QApplication.instance().installNativeEventFilter(self.hotkey_filter)
         
+        # Parse hotkey from config (e.g. "Ctrl+Shift+T")
+        # For now, we only support the default modifiers for simplicity
         MOD_CONTROL = 0x0002
         MOD_SHIFT = 0x0004
         VK_T = 0x54 # 'T' key
         
         if not ctypes.windll.user32.RegisterHotKey(None, self.HOTKEY_ID, MOD_CONTROL | MOD_SHIFT, VK_T):
-            print("Warning: Could not register global hotkey Ctrl+Shift+T")
+            logger.warning(f"Could not register global hotkey {config.get('hotkey')}")
 
     def setup_tray(self):
         import os

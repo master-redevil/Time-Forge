@@ -6,6 +6,7 @@ import random
 from ctypes import wintypes
 from PySide6.QtCore import QThread, Signal
 import database
+from config import config
 
 logger = logging.getLogger("TimeForge.Tracker")
 
@@ -82,8 +83,9 @@ class TrackerDaemon(QThread):
                     retry_delay = 1
                     continue
                 
-                # Throttle full process scanning to every 30 seconds
-                if now - last_process_scan > 30:
+                # Throttle full process scanning
+                scan_interval = config.get("scan_interval", 30)
+                if now - last_process_scan > scan_interval:
                     running_apps = set()
                     for proc in psutil.process_iter(['name']):
                         try:
@@ -105,7 +107,8 @@ class TrackerDaemon(QThread):
                     last_process_scan = now
 
                 idle_time = get_idle_time()
-                is_idle = idle_time > 60
+                idle_threshold = config.get("idle_threshold", 60)
+                is_idle = idle_time > idle_threshold
                 focused_app = get_foreground_app()
                 
                 if focused_app:
