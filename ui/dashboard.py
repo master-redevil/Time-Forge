@@ -20,6 +20,32 @@ from ctypes import wintypes
 import datetime
 import math
 from PySide6.QtCore import Property
+import os
+
+SYSTEM_PROCESS_BLOCKLIST = {
+    # Core System
+    'svchost.exe', 'csrss.exe', 'dwm.exe', 'smss.exe', 'wininit.exe', 'services.exe', 
+    'lsass.exe', 'winlogon.exe', 'sihost.exe', 'conhost.exe', 'taskhostw.exe',
+    'dllhost.exe', 'runtimebroker.exe', 'ctfmon.exe', 'spoolsv.exe',
+    
+    # UI & Shell
+    'explorer.exe', 'shellexperiencehost.exe', 'startmenuexperiencehost.exe', 
+    'searchhost.exe', 'searchindexer.exe', 'searchapp.exe', 'textinputhost.exe',
+    'applicationframehost.exe', 'fontdrvhost.exe', 'smartscreen.exe', 'chxsmartscreen.exe',
+    
+    # Background Services & Maintenance
+    'aggregatorhost.exe', 'audiodg.exe', 'securityhealthservice.exe', 'usocoreworker.exe',
+    'compattelrunner.exe', 'mscorsvw.exe', 'sppsvc.exe', 'wsappx.exe', 'dashost.exe',
+    'backgroundtaskhost.exe', 'agmservice.exe', 'credentialenrollmentmanager.exe',
+    'phoneexperiencehost.exe', 'yourphone.exe', 'mobsync.exe', 'msdtc.exe',
+    'securityhealthsystray.exe', 'systemsettings.exe',
+    
+    # Newly Identified Services (Screenshot batch)
+    'etdservice.exe', 'filecoauth.exe', 'fmservice64.exe', 'gameinputredistservice.exe',
+    'gameinputsvc.exe', 'gamingservices.exe', 'gamingservicesnet.exe', 'hxtsr.exe',
+    'ibmpmsvc.exe', 'lsess.exe', 'mousocoreworker.exe', 'onenotem.exe', 'scvhost.exe',
+    'spoolsv.exe', 'smartscreen.exe', 'unsecapp.exe', 'wudfhost.exe'
+}
 
 class SmoothScrollList(QListWidget):
     def __init__(self, parent=None):
@@ -849,6 +875,22 @@ class AppManagementView(QWidget):
         self.btn_refresh.clicked.connect(self.refresh_data)
         header_layout.addWidget(self.btn_refresh)
         
+        # System Apps Toggle
+        header_layout.addSpacing(10)
+        system_toggle_layout = QHBoxLayout()
+        system_toggle_layout.setSpacing(8)
+        
+        system_label = QLabel("Show System")
+        system_label.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: bold;")
+        system_toggle_layout.addWidget(system_label)
+        
+        self.system_toggle = ToggleSwitch()
+        self.system_toggle.setChecked(False)
+        self.system_toggle.toggled.connect(self.set_show_system)
+        system_toggle_layout.addWidget(self.system_toggle)
+        
+        header_layout.addLayout(system_toggle_layout)
+        
         layout.addLayout(header_layout)
 
         # App List
@@ -927,11 +969,30 @@ class AppManagementView(QWidget):
         # Sort by display name
         self.all_apps_data.sort(key=lambda x: x['display_name'])
 
+    def set_show_system(self, checked):
+        self.show_system_apps = checked
+        self.filter_apps()
+
     def filter_apps(self):
         search_text = self.search_input.text().lower()
         self.app_list.clear()
         
+        show_system = getattr(self, 'show_system_apps', False)
+        
         for app_data in self.all_apps_data:
+            app_name = app_data['name'].lower()
+            
+            # P3.4: Filter system processes (Blocklist + Path/Name Heuristics)
+            exe_path = (app_data.get('exe') or "").lower()
+            is_system = app_name in SYSTEM_PROCESS_BLOCKLIST or \
+                        (not app_name.endswith('.exe') and f"{app_name}.exe" in SYSTEM_PROCESS_BLOCKLIST) or \
+                        "c:\\windows" in exe_path or \
+                        "windowsapps" in exe_path or \
+                        any(suffix in app_name for suffix in ['service.exe', 'services.exe', 'svc.exe', 'service64.exe'])
+            
+            if not show_system and is_system:
+                continue
+                
             if search_text and search_text not in app_data['display_name'].lower():
                 continue
                 
