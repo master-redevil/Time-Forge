@@ -340,3 +340,29 @@ def get_device_activity_history(days=7):
     ''', (start_date,))
     data = {row[0]: row[1] for row in cursor.fetchall()}
     return data
+
+def get_sessions_range(start_date, end_date):
+    """Returns all session records between two dates (inclusive)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT app_name, start_date, duration_seconds 
+        FROM Sessions 
+        WHERE date(start_date) >= ? AND date(start_date) <= ?
+        ORDER BY start_date ASC
+    ''', (start_date, end_date))
+    data = [{'app': row[0], 'start': row[1], 'duration': row[2]} for row in cursor.fetchall()]
+    return data
+
+def get_usage_range(start_date, end_date):
+    """Returns daily usage summaries per app between two dates (inclusive)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT log_date, app_name, duration_seconds 
+        FROM UsageLogs 
+        WHERE log_date >= ? AND log_date <= ?
+        ORDER BY log_date ASC, duration_seconds DESC
+    ''', (start_date, end_date))
+    data = [{'date': row[0], 'app': row[1], 'duration': row[2]} for row in cursor.fetchall()]
+    return data

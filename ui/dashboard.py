@@ -3,10 +3,13 @@ from PySide6.QtWidgets import (
     QPushButton, QStackedWidget, QListWidget, QListWidgetItem, QFileIconProvider, QStyle,
     QFrame, QGridLayout, QScrollArea, QGroupBox, QGraphicsDropShadowEffect, QGraphicsColorizeEffect,
     QGraphicsOpacityEffect, QApplication, QAbstractItemView, QLineEdit, QCalendarWidget, QMenu, QWidgetAction,
-    QSpinBox, QProgressBar
+    QSpinBox, QProgressBar, QDialog, QFileDialog, QComboBox, QDateEdit
 )
-from PySide6.QtCore import Qt, QTimer, QFileInfo, Signal, QSize, QPropertyAnimation, QEasingCurve, QRect, QDateTime, QDate, QMargins
-from PySide6.QtGui import QPainter, QColor, QFont, QIcon, QPixmap, QBrush, QPainterPath, QLinearGradient, QPen
+import csv
+import json
+from PySide6.QtPrintSupport import QPrinter
+from PySide6.QtCore import Qt, QTimer, QFileInfo, Signal, QSize, QPropertyAnimation, QEasingCurve, QRect, QDateTime, QDate, QMargins, QBuffer, QIODevice
+from PySide6.QtGui import QPainter, QColor, QFont, QIcon, QPixmap, QBrush, QPainterPath, QLinearGradient, QPen, QTextDocument, QPageLayout
 from PySide6.QtCharts import (
     QChart, QChartView, QPieSeries, QBarSeries, QStackedBarSeries, QBarSet, 
     QBarCategoryAxis, QValueAxis, QLineSeries, QDateTimeAxis
@@ -17,6 +20,7 @@ import psutil
 import time
 import ctypes
 from ctypes import wintypes
+import base64
 import datetime
 import math
 from PySide6.QtCore import Property
@@ -132,12 +136,21 @@ class WindowButton(QPushButton):
             painter.drawLine(cx - s, cy + s, cx + s, cy - s)
 
 def format_time(seconds):
-    hours = seconds // 3600
-    minutes = (seconds % 3600) // 60
-    secs = seconds % 60
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
     if hours > 0:
         return f"{hours:02}:{minutes:02}:{secs:02}"
     return f"{minutes:02}:{secs:02}"
+
+def format_duration_pleasant(seconds):
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    if hours > 0:
+        return f"{hours}h {minutes}m"
+    if minutes > 0:
+        return f"{minutes}m"
+    return f"{int(seconds)}s"
 
 class SidebarButton(QPushButton):
     def __init__(self, text, icon_path=None, parent=None):
@@ -1461,6 +1474,418 @@ class TimelineWidget(QWidget):
             display_name = app[:-4].title() if app.lower().endswith('.exe') else app.title()
             painter.drawText(15, int(y + row_h/2 + 5), display_name)
 
+class ExportDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(400, 550)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Main container with glassmorphic style
+        self.container = QFrame()
+        self.container.setObjectName("ExportContainer")
+        self.container.setStyleSheet("""
+            QFrame#ExportContainer {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #1E2430, stop:1 #161B22);
+                border: 1px solid rgba(99, 102, 241, 0.3);
+                border-radius: 20px;
+            }
+        """)
+        
+        container_layout = QVBoxLayout(self.container)
+        container_layout.setContentsMargins(30, 30, 30, 30)
+        container_layout.setSpacing(20)
+        
+        # Header
+        header_row = QHBoxLayout()
+        title = QLabel("Export Data")
+        title.setStyleSheet("color: white; font-size: 15pt; font-weight: 800;")
+        header_row.addWidget(title)
+        
+        header_row.addStretch()
+        
+        close_btn = QPushButton("×")
+        close_btn.setFixedSize(30, 30)
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #94A3B8;
+                font-size: 12pt;
+                border: none;
+                border-radius: 15px;
+                padding: 0px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 255, 255, 0.1);
+                color: #F43F5E;
+            }
+        """)
+        close_btn.clicked.connect(self.reject)
+        header_row.addWidget(close_btn)
+        container_layout.addLayout(header_row)
+        
+        # Date Range Section
+        container_layout.addWidget(self.create_section_label("DATE RANGE"))
+        
+        date_layout = QHBoxLayout()
+        
+        from_col = QVBoxLayout()
+        from_col.addWidget(QLabel("Start Date"))
+        self.start_date = QDateEdit(QDate.currentDate().addDays(-7))
+        self.start_date.setCalendarPopup(True)
+        self.start_date.setStyleSheet(self.get_input_style())
+        from_col.addWidget(self.start_date)
+        date_layout.addLayout(from_col)
+        
+        to_col = QVBoxLayout()
+        to_col.addWidget(QLabel("End Date"))
+        self.end_date = QDateEdit(QDate.currentDate())
+        self.end_date.setCalendarPopup(True)
+        self.end_date.setStyleSheet(self.get_input_style())
+        to_col.addWidget(self.end_date)
+        date_layout.addLayout(to_col)
+        
+        container_layout.addLayout(date_layout)
+        
+        # Export Format Section
+        container_layout.addWidget(self.create_section_label("FORMAT"))
+        
+        self.format_combo = QComboBox()
+        self.format_combo.addItems(["CSV (Excel Compatible)", "JSON", "PDF Document"])
+        self.format_combo.setStyleSheet(self.get_input_style())
+        container_layout.addWidget(self.format_combo)
+        
+        # Data Category Section
+        container_layout.addWidget(self.create_section_label("DATA CATEGORY"))
+        
+        self.category_combo = QComboBox()
+        self.category_combo.addItems(["Detailed Sessions", "Daily Usage Summary"])
+        self.category_combo.setStyleSheet(self.get_input_style())
+        container_layout.addWidget(self.category_combo)
+        
+        container_layout.addStretch()
+        
+        # Export Action
+        self.btn_confirm = QPushButton("GENERATE EXPORT")
+        self.btn_confirm.setFixedHeight(50)
+        self.btn_confirm.setCursor(Qt.PointingHandCursor)
+        self.btn_confirm.setStyleSheet("""
+            QPushButton {
+                background-color: #6366F1;
+                color: white;
+                border: none;
+                border-radius: 12px;
+                font-weight: 900;
+                font-size: 10pt;
+                letter-spacing: 1px;
+            }
+            QPushButton:hover {
+                background-color: #4F46E5;
+            }
+        """)
+        self.btn_confirm.clicked.connect(self.perform_export)
+        container_layout.addWidget(self.btn_confirm)
+        
+        layout.addWidget(self.container)
+        
+        # Shadow effect
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(30)
+        shadow.setColor(QColor(0, 0, 0, 150))
+        shadow.setOffset(0, 5)
+        self.container.setGraphicsEffect(shadow)
+
+    def create_section_label(self, text):
+        lbl = QLabel(text)
+        lbl.setStyleSheet("color: #6366F1; font-size: 8pt; font-weight: 900; letter-spacing: 1.5px;")
+        return lbl
+
+    def get_input_style(self):
+        return """
+            QDateEdit, QComboBox {
+                background-color: #2D3748;
+                border: 1px solid #4A5568;
+                border-radius: 8px;
+                padding: 10px;
+                color: #CDD6F4;
+                font-size: 10pt;
+            }
+            QDateEdit:focus, QComboBox:focus {
+                border-color: #6366F1;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 30px;
+            }
+            QDateEdit::drop-down {
+                border: none;
+                width: 30px;
+            }
+        """
+
+    def perform_export(self):
+        start = self.start_date.date().toPython().isoformat()
+        end = self.end_date.date().toPython().isoformat()
+        idx = self.format_combo.currentIndex()
+        fmt = ["csv", "json", "pdf"][idx]
+        cat = self.category_combo.currentIndex()
+        
+        file_filter = {
+            "csv": "CSV Files (*.csv)",
+            "json": "JSON Files (*.json)",
+            "pdf": "PDF Files (*.pdf)"
+        }[fmt]
+        
+        report_type = "Detailed_Sessions" if cat == 0 else "Daily_Usage_Summary"
+        default_name = f"TimeForge_{report_type}_{start}_to_{end}.{fmt}"
+        
+        path, _ = QFileDialog.getSaveFileName(self, "Save Export File", default_name, file_filter)
+        
+        if not path:
+            return
+            
+        try:
+            if fmt == "pdf":
+                self.generate_pdf(path, start, end, cat)
+            else:
+                if cat == 0: # Detailed Sessions
+                    raw_data = database.get_sessions_range(start, end)
+                    data = []
+                    for d in raw_data:
+                        start_dt = datetime.datetime.fromisoformat(d['start'])
+                        end_dt = start_dt + datetime.timedelta(seconds=d['duration'])
+                        data.append({
+                            'app': d['app'],
+                            'start_time': start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                            'end_time': end_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                            'duration_seconds': d['duration'],
+                            'duration_formatted': format_duration_pleasant(d['duration'])
+                        })
+                        
+                    if fmt == "csv":
+                        with open(path, 'w', newline='', encoding='utf-8') as f:
+                            writer = csv.DictWriter(f, fieldnames=['app', 'start_time', 'end_time', 'duration_seconds', 'duration_formatted'])
+                            writer.writeheader()
+                            writer.writerows(data)
+                    else:
+                        with open(path, 'w', encoding='utf-8') as f:
+                            json.dump(data, f, indent=4)
+                else: # Daily Summary
+                    raw_data = database.get_usage_range(start, end)
+                    data = []
+                    for d in raw_data:
+                        data.append({
+                            'date': d['date'],
+                            'app': d['app'],
+                            'duration_seconds': d['duration'],
+                            'duration_formatted': format_duration_pleasant(d['duration'])
+                        })
+                        
+                    if fmt == "csv":
+                        with open(path, 'w', newline='', encoding='utf-8') as f:
+                            writer = csv.DictWriter(f, fieldnames=['date', 'app', 'duration_seconds', 'duration_formatted'])
+                            writer.writeheader()
+                            writer.writerows(data)
+                    else:
+                        with open(path, 'w', encoding='utf-8') as f:
+                            json.dump(data, f, indent=4)
+            
+            # Show success feedback
+            self.btn_confirm.setText("✓ EXPORT SUCCESSFUL")
+            self.btn_confirm.setStyleSheet("background-color: #10B981; color: white; border-radius: 12px; font-weight: 900;")
+            QTimer.singleShot(2000, self.accept)
+            
+        except Exception as e:
+            from main import logger
+            logger.error(f"Export failed: {e}")
+            self.btn_confirm.setText(f"ERROR: {str(e)[:20]}...")
+            self.btn_confirm.setStyleSheet("background-color: #EF4444; color: white; border-radius: 12px;")
+
+    def generate_pdf(self, path, start, end, cat):
+        # Prepare data and logo
+        icon_provider = QFileIconProvider()
+        app_paths = database.get_app_paths()
+        
+        def get_icon_base64(app_name):
+            exe_path = app_paths.get(app_name)
+            if exe_path and os.path.exists(exe_path):
+                icon = icon_provider.icon(QFileInfo(exe_path))
+                pixmap = icon.pixmap(QSize(32, 32))
+                buffer = QBuffer()
+                buffer.open(QIODevice.WriteOnly)
+                pixmap.save(buffer, "PNG")
+                return base64.b64encode(buffer.data().data()).decode('utf-8')
+            return ""
+
+        logo_base64 = ""
+        logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "logo.png")
+        if os.path.exists(logo_path):
+            with open(logo_path, "rb") as image_file:
+                logo_base64 = base64.b64encode(image_file.read()).decode('utf-8')
+
+        start_dt_obj = datetime.date.fromisoformat(start)
+        end_dt_obj = datetime.date.fromisoformat(end)
+        date_range_str = start_dt_obj.strftime("%B %d, %Y") if start == end else f"{start_dt_obj.strftime('%b %d')} - {end_dt_obj.strftime('%b %d, %Y')}"
+
+        if cat == 0:
+            raw_data = database.get_sessions_range(start, end)
+            title = "Detailed Activity Sessions"
+            headers = ["", "Application", "Start Time", "End Time", "Duration"]
+            col_widths = ["5%", "40%", "18%", "18%", "19%"]
+            rows = []
+            total_seconds = 0
+            apps_seen = set()
+            last_date = None
+            
+            for d in raw_data:
+                start_dt = datetime.datetime.fromisoformat(d['start'])
+                end_dt = start_dt + datetime.timedelta(seconds=d['duration'])
+                
+                date_str = start_dt.strftime("%Y-%m-%d")
+                if date_str != last_date:
+                    rows.append({
+                        'html': f'<tr class="date-row"><td colspan="5" class="date-cell">{start_dt.strftime("%B %d, %Y")}</td></tr>'
+                    })
+                    last_date = date_str
+
+                icon_b64 = get_icon_base64(d['app'])
+                icon_img = f'<img src="data:image/png;base64,{icon_b64}" width="16" height="16">' if icon_b64 else ""
+                
+                display_name = d['app'][:-4].title() if d['app'].lower().endswith('.exe') else d['app'].title()
+                total_seconds += d['duration']
+                apps_seen.add(display_name)
+                
+                rows.append({
+                    'data': [icon_img, display_name, start_dt.strftime("%H:%M:%S"), end_dt.strftime("%H:%M:%S"), format_duration_pleasant(d['duration'])],
+                    'style': ""
+                })
+            
+            summary_stats = [
+                ("Total Time", format_duration_pleasant(total_seconds)),
+                ("Apps Used", str(len(apps_seen))),
+                ("Sessions", str(len(raw_data)))
+            ]
+        else:
+            raw_data = database.get_usage_range(start, end)
+            title = "Daily Usage Summary"
+            headers = ["", "Application", "Duration"]
+            col_widths = ["5%", "70%", "25%"]
+            rows = []
+            total_seconds = 0
+            
+            # For summary
+            app_usage = {}
+            last_date = None
+            
+            for d in raw_data:
+                if d['date'] != last_date:
+                    date_obj = datetime.date.fromisoformat(d['date'])
+                    rows.append({
+                        'html': f'<tr class="date-row"><td colspan="3" class="date-cell">{date_obj.strftime("%B %d, %Y")}</td></tr>'
+                    })
+                    last_date = d['date']
+
+                icon_b64 = get_icon_base64(d['app'])
+                icon_img = f'<img src="data:image/png;base64,{icon_b64}" width="16" height="16">' if icon_b64 else ""
+                display_name = d['app'][:-4].title() if d['app'].lower().endswith('.exe') else d['app'].title()
+                
+                total_seconds += d['duration']
+                app_usage[display_name] = app_usage.get(display_name, 0) + d['duration']
+                
+                rows.append({
+                    'data': [icon_img, display_name, format_duration_pleasant(d['duration'])],
+                    'style': ""
+                })
+            
+            most_used = max(app_usage, key=app_usage.get) if app_usage else "N/A"
+            summary_stats = [
+                ("Total Usage", format_duration_pleasant(total_seconds)),
+                ("Most Used", most_used),
+                ("Entries", str(len(raw_data)))
+            ]
+
+        summary_html = "".join([f"""
+            <div class="stat-card">
+                <div class="stat-label">{label}</div>
+                <div class="stat-value">{value}</div>
+            </div>
+        """ for label, value in summary_stats])
+
+        html = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: 'Segoe UI', Tahoma, sans-serif; color: #1e293b; padding: 0 10pt 10pt 10pt; }}
+                .header {{ text-align: center; margin-bottom: 15pt; border-bottom: 2pt solid #6366f1; padding-bottom: 15pt; }}
+                h1 {{ color: #1e293b; margin: 0; font-size: 24pt; font-weight: bold; }}
+                h2 {{ color: #6366f1; margin: 4pt 0 0 0; font-size: 14pt; text-transform: uppercase; letter-spacing: 1pt; }}
+                
+                .date-header {{ text-align: center; font-size: 12pt; font-weight: bold; color: #475569; margin-top: 15pt; margin-bottom: 10pt; text-transform: uppercase; letter-spacing: 0.5pt; }}
+                
+                .summary-container {{ margin-bottom: 20pt; text-align: center; width: 100%; }}
+                .stat-card {{ display: inline-block; width: 30%; background-color: #f8fafc; border: 1pt solid #e2e8f0; padding: 10pt; margin: 0 1%; }}
+                .stat-label {{ color: #64748b; font-size: 8pt; text-transform: uppercase; font-weight: bold; }}
+                .stat-value {{ color: #6366f1; font-size: 14pt; font-weight: bold; margin-top: 2pt; }}
+
+                table {{ width: 100%; border-collapse: collapse; margin-top: 10pt; table-layout: fixed; }}
+                th {{ background-color: #f1f5f9; color: #475569; padding: 10pt 5pt; text-align: left; border-bottom: 1.5pt solid #cbd5e1; font-weight: bold; font-size: 9pt; text-transform: uppercase; }}
+                td {{ padding: 10pt 5pt; border-bottom: 0.5pt solid #e2e8f0; font-size: 9pt; color: #334155; vertical-align: middle; }}
+                .icon-col {{ text-align: center; }}
+                
+                .date-row {{ background-color: #f1f5f9; border-top: 2pt solid #6366f1; border-bottom: 1pt solid #cbd5e1; }}
+                .date-cell {{ font-weight: bold; font-size: 11pt; color: #1e293b; padding: 8pt 10pt; text-align: left; }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                {f'<img src="data:image/png;base64,{logo_base64}" width="80" height="80" style="margin-bottom: 5pt;">' if logo_base64 else ''}
+                <h1>TIME FORGE</h1>
+                <h2>{title}</h2>
+            </div>
+            
+            <div class="date-header">Report Period: {date_range_str}</div>
+            
+            <div class="summary-container">
+                {summary_html}
+            </div>
+            
+            <table>
+                <thead>
+                    <tr>
+                        {"".join(f'<th width="{col_widths[i]}">{h if h else "&nbsp;"}</th>' for i, h in enumerate(headers))}
+                    </tr>
+                </thead>
+                <tbody>
+                    {"".join(r['html'] if 'html' in r else f"<tr{r['style']}><td class='icon-col'>{r['data'][0]}</td>{''.join(f'<td>{col}</td>' for col in r['data'][1:])}</tr>" for r in rows)}
+                </tbody>
+            </table>
+            
+            <div style="text-align: center; font-size: 8pt; color: #94a3b8; margin-top: 30pt; padding-top: 15pt; border-top: 0.5pt solid #e2e8f0;">
+                Generated by <b>Time Forge Analytics</b> on {datetime.date.today().strftime("%B %d, %Y")}
+            </div>
+        </body>
+        </html>
+        """
+        
+        doc = QTextDocument()
+        doc.setDefaultFont(QFont("Segoe UI", 10))
+        doc.setHtml(html)
+        
+        printer = QPrinter(QPrinter.HighResolution)
+        printer.setOutputFormat(QPrinter.PdfFormat)
+        printer.setOutputFileName(path)
+        printer.setPageMargins(QMargins(15, 10, 15, 15), QPageLayout.Unit.Millimeter)
+        
+        doc.print_(printer)
+
 class AnalyticsView(QWidget):
     def __init__(self):
         super().__init__()
@@ -1502,6 +1927,35 @@ class AnalyticsView(QWidget):
         """)
         self.date_btn.clicked.connect(self.show_calendar)
         header_layout.addWidget(self.date_btn)
+        
+        # Export Button
+        self.btn_export = QPushButton("Export")
+        self.btn_export.setFixedWidth(120)
+        self.btn_export.setCursor(Qt.PointingHandCursor)
+        
+        icons_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "icons")
+        export_icon = QIcon(os.path.join(icons_path, "export.svg"))
+        self.btn_export.setIcon(export_icon)
+        self.btn_export.setIconSize(QSize(18, 18))
+        
+        self.btn_export.setStyleSheet("""
+            QPushButton {
+                background-color: #6366F1;
+                color: white;
+                border: none;
+                border-radius: 10px;
+                padding: 10px 15px;
+                font-weight: 800;
+                font-size: 13px;
+                margin-left: 5px;
+            }
+            QPushButton:hover {
+                background-color: #4F46E5;
+            }
+        """)
+        self.btn_export.clicked.connect(self.show_export_dialog)
+        header_layout.addWidget(self.btn_export)
+        
         layout.addLayout(header_layout)
 
         # Tab Bar
@@ -1646,6 +2100,10 @@ class AnalyticsView(QWidget):
         menu.close()
         self.refresh_data()
 
+    def show_export_dialog(self):
+        dialog = ExportDialog(self)
+        dialog.exec()
+
     def refresh_data(self):
         date_iso = self.selected_date.toPython().isoformat()
         idx = self.stack.currentIndex()
@@ -1745,6 +2203,11 @@ class AnalyticsView(QWidget):
             axis_y.setTickCount(6)
             axis_y.setLabelFormat("%d m")
             axis_y.setLabelsColor(QColor("#CDD6F4"))
+            
+            font_y = axis_y.labelsFont()
+            font_y.setPointSize(8)
+            axis_y.setLabelsFont(font_y)
+            
             axis_y.setGridLineColor(QColor(255, 255, 255, 20))
             self.bar_chart.addAxis(axis_y, Qt.AlignLeft)
             main_series.attachAxis(axis_y)
@@ -1817,6 +2280,11 @@ class AnalyticsView(QWidget):
         axis_x = QBarCategoryAxis()
         axis_x.append(categories)
         axis_x.setLabelsColor(QColor("#CDD6F4"))
+        
+        font_x = axis_x.labelsFont()
+        font_x.setPointSize(8)
+        axis_x.setLabelsFont(font_x)
+        
         axis_x.setGridLineVisible(False)
         self.line_chart.addAxis(axis_x, Qt.AlignBottom)
         series.attachAxis(axis_x)
@@ -1826,6 +2294,11 @@ class AnalyticsView(QWidget):
         axis_y.setTickCount(6)
         axis_y.setLabelFormat("%d m")
         axis_y.setLabelsColor(QColor("#CDD6F4"))
+        
+        font_y = axis_y.labelsFont()
+        font_y.setPointSize(8)
+        axis_y.setLabelsFont(font_y)
+        
         axis_y.setGridLineColor(QColor(255, 255, 255, 20))
         self.line_chart.addAxis(axis_y, Qt.AlignLeft)
         series.attachAxis(axis_y)

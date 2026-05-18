@@ -2,7 +2,7 @@ import sys
 import ctypes
 from ctypes import wintypes
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
-from PySide6.QtGui import QIcon, QPixmap, QColor, QPainter
+from PySide6.QtGui import QIcon, QPixmap, QColor, QPainter, QFont
 from PySide6.QtCore import QObject, Signal, Slot, Qt, QAbstractNativeEventFilter
 
 import database
@@ -145,6 +145,11 @@ class AppController(QObject):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    
+    # Set a default font to prevent 'PointSize <= 0 (-1)' warnings during internal Qt initialization
+    default_font = QFont("Segoe UI", 10)
+    app.setFont(default_font)
+    
     app.setQuitOnLastWindowClosed(False) # Keep running in tray
     
     controller = AppController()
