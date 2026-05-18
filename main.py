@@ -144,6 +144,12 @@ class AppController(QObject):
         QApplication.quit()
 
 if __name__ == "__main__":
+    # P4.3: Single-instance enforcement
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, True, "TimeForge_SingleInstance")
+    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        logger.warning("Another instance of Time Forge is already running. Exiting.")
+        sys.exit(0)
+
     app = QApplication(sys.argv)
     
     # Set a default font to prevent 'PointSize <= 0 (-1)' warnings during internal Qt initialization
