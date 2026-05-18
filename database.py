@@ -55,56 +55,61 @@ def init_db():
     os.makedirs(DB_DIR, exist_ok=True)
     
     conn = get_connection()
+    apply_migrations(conn)
+
+def apply_migrations(conn):
     cursor = conn.cursor()
-    # Table to store which apps we are tracking
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS TrackedApps (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            app_name TEXT UNIQUE NOT NULL
-        )
-    ''')
-    try:
-        cursor.execute('ALTER TABLE TrackedApps ADD COLUMN exe_path TEXT')
-    except sqlite3.OperationalError:
-        pass # Column might already exist
-    # Table to store usage logs per day
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS UsageLogs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            app_name TEXT NOT NULL,
-            log_date DATE NOT NULL,
-            duration_seconds INTEGER DEFAULT 0,
-            UNIQUE(app_name, log_date)
-        )
-    ''')
-    # Table to store individual usage sessions
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS Sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            app_name TEXT,
-            start_date DATETIME,
-            duration_seconds INTEGER DEFAULT 0,
-            is_active BOOLEAN DEFAULT 1
-        )
-    ''')
-    # Table to store total device active time (not idle)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS DeviceActivity (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            log_date DATE UNIQUE NOT NULL,
-            duration_seconds INTEGER DEFAULT 0
-        )
-    ''')
     
-    # Migration: Ensure all columns exist (for older schemas)
-    cursor.execute("PRAGMA table_info(Sessions)")
-    columns = [row[1] for row in cursor.fetchall()]
+    # 1. Create SchemaVersion table if not exists
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS SchemaVersion (
+            version INTEGER PRIMARY KEY
+        )
+    ''')
+    cursor.execute('SELECT version FROM SchemaVersion')
+    row = cursor.fetchone()
     
-    # If legacy column 'start_time' exists, it will cause IntegrityErrors.
-    # Since sessions are reset on app start anyway, we can safely drop and recreate.
-    if 'start_time' in columns:
-        cursor.execute('DROP TABLE Sessions')
-        # Re-run the creation
+    if row is None:
+        # Infer version based on existing tables
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='TrackedApps'")
+        if cursor.fetchone():
+            # DB exists. Let's check schema features to infer version.
+            cursor.execute("PRAGMA table_info(TrackedApps)")
+            tracked_cols = [c[1] for c in cursor.fetchall()]
+            
+            cursor.execute("PRAGMA table_info(Sessions)")
+            session_cols = [c[1] for c in cursor.fetchall()]
+            
+            if 'exe_path' in tracked_cols and 'start_date' in session_cols and 'start_time' not in session_cols:
+                current_version = 2
+            else:
+                current_version = 1
+        else:
+            # Brand new DB
+            current_version = 0
+            
+        cursor.execute("INSERT INTO SchemaVersion (version) VALUES (?)", (current_version,))
+    else:
+        current_version = row[0]
+
+    # Run migrations sequentially
+    if current_version < 1:
+        # v1: Initial schema
+        cursor.execute('''
+            CREATE TABLE TrackedApps (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                app_name TEXT UNIQUE NOT NULL
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE UsageLogs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                app_name TEXT NOT NULL,
+                log_date DATE NOT NULL,
+                duration_seconds INTEGER DEFAULT 0,
+                UNIQUE(app_name, log_date)
+            )
+        ''')
         cursor.execute('''
             CREATE TABLE Sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,22 +119,89 @@ def init_db():
                 is_active BOOLEAN DEFAULT 1
             )
         ''')
-        # Refresh column list for subsequent checks
+        cursor.execute('''
+            CREATE TABLE DeviceActivity (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                log_date DATE UNIQUE NOT NULL,
+                duration_seconds INTEGER DEFAULT 0
+            )
+        ''')
+        cursor.execute("UPDATE SchemaVersion SET version = 1")
+        conn.commit()
+        current_version = 1
+
+    if current_version < 2:
+        # v2: Add exe_path to TrackedApps and ensure Sessions schema is correct
+        try:
+            cursor.execute('ALTER TABLE TrackedApps ADD COLUMN exe_path TEXT')
+        except sqlite3.OperationalError:
+            pass # Ignore if already exists
+
+        # Handle Sessions migration safely (avoiding DROP TABLE without backup)
         cursor.execute("PRAGMA table_info(Sessions)")
-        columns = [row[1] for row in cursor.fetchall()]
+        columns = [c[1] for c in cursor.fetchall()]
+        
+        needs_session_migration = False
+        if 'start_time' in columns or 'app_name' not in columns or 'start_date' not in columns:
+            needs_session_migration = True
 
-    if 'app_name' not in columns:
-        cursor.execute('ALTER TABLE Sessions ADD COLUMN app_name TEXT')
-    if 'start_date' not in columns:
-        cursor.execute('ALTER TABLE Sessions ADD COLUMN start_date DATETIME')
-    if 'duration_seconds' not in columns:
-        cursor.execute('ALTER TABLE Sessions ADD COLUMN duration_seconds INTEGER DEFAULT 0')
-    if 'is_active' not in columns:
-        cursor.execute('ALTER TABLE Sessions ADD COLUMN is_active BOOLEAN DEFAULT 1')
+        if needs_session_migration:
+            try:
+                cursor.execute("ALTER TABLE Sessions RENAME TO Sessions_backup_v1")
+            except sqlite3.OperationalError:
+                # Fallback if backup table already exists
+                cursor.execute("DROP TABLE IF EXISTS Sessions_backup_v1")
+                cursor.execute("ALTER TABLE Sessions RENAME TO Sessions_backup_v1")
 
-    # Reset any dangling active sessions from previous crashes
-    cursor.execute('UPDATE Sessions SET is_active = 0 WHERE is_active = 1')
-    conn.commit()
+            cursor.execute('''
+                CREATE TABLE Sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    app_name TEXT,
+                    start_date DATETIME,
+                    duration_seconds INTEGER DEFAULT 0,
+                    is_active BOOLEAN DEFAULT 1
+                )
+            ''')
+
+        # Reset any dangling active sessions from previous crashes
+        cursor.execute('UPDATE Sessions SET is_active = 0 WHERE is_active = 1')
+        
+        cursor.execute("UPDATE SchemaVersion SET version = 2")
+        conn.commit()
+        current_version = 2
+
+@with_db_lock
+def rollback_migration(target_version):
+    """Rolls back the database to a target schema version."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='SchemaVersion'")
+    if not cursor.fetchone():
+        return False
+        
+    cursor.execute('SELECT version FROM SchemaVersion')
+    row = cursor.fetchone()
+    if not row:
+        return False
+        
+    current_version = row[0]
+    
+    if target_version >= current_version:
+        return False # Nothing to roll back
+        
+    if current_version == 2 and target_version == 1:
+        # Rollback v2 to v1
+        # 1. Restore Sessions from backup if it exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='Sessions_backup_v1'")
+        if cursor.fetchone():
+            cursor.execute("DROP TABLE Sessions")
+            cursor.execute("ALTER TABLE Sessions_backup_v1 RENAME TO Sessions")
+            
+        cursor.execute("UPDATE SchemaVersion SET version = 1")
+        conn.commit()
+        
+    return True
 
 @with_db_lock
 def cleanup_old_data():
