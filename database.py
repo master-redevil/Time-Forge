@@ -2,10 +2,21 @@ import sqlite3
 import datetime
 import os
 import threading
+from functools import wraps
 from config import config
 
 DB_DIR = os.path.join(os.environ.get('LOCALAPPDATA', '.'), 'TimeForge')
 DB_NAME = os.path.join(DB_DIR, config.get("database_name", "usage.db"))
+
+
+db_lock = threading.RLock()
+
+def with_db_lock(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        with db_lock:
+            return func(*args, **kwargs)
+    return wrapper
 
 def _migrate_existing_db():
     """Moves usage.db from the current directory to the app data directory if it exists."""
@@ -38,6 +49,7 @@ def get_connection():
     _local.conn = conn
     return conn
 
+@with_db_lock
 def init_db():
     _migrate_existing_db()
     os.makedirs(DB_DIR, exist_ok=True)
@@ -119,6 +131,7 @@ def init_db():
     cursor.execute('UPDATE Sessions SET is_active = 0 WHERE is_active = 1')
     conn.commit()
 
+@with_db_lock
 def cleanup_old_data():
     """Removes records older than the configured retention period."""
     retention_days = config.get("data_retention_days", 90)
@@ -161,6 +174,7 @@ def get_db_size():
         return os.path.getsize(DB_NAME)
     return 0
 
+@with_db_lock
 def get_tracked_apps():
     conn = get_connection()
     cursor = conn.cursor()
@@ -168,6 +182,7 @@ def get_tracked_apps():
     apps = [row[0] for row in cursor.fetchall()]
     return apps
 
+@with_db_lock
 def add_tracked_app(app_name, exe_path=None):
     conn = get_connection()
     cursor = conn.cursor()
@@ -181,12 +196,14 @@ def add_tracked_app(app_name, exe_path=None):
     except sqlite3.IntegrityError:
         return False
 
+@with_db_lock
 def update_app_path(app_name, exe_path):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('UPDATE TrackedApps SET exe_path = ? WHERE app_name = ?', (exe_path, app_name.lower()))
     conn.commit()
 
+@with_db_lock
 def get_app_paths():
     conn = get_connection()
     cursor = conn.cursor()
@@ -194,6 +211,7 @@ def get_app_paths():
     paths = {row[0]: row[1] for row in cursor.fetchall()}
     return paths
 
+@with_db_lock
 def remove_tracked_app(app_name):
     conn = get_connection()
     cursor = conn.cursor()
@@ -203,6 +221,7 @@ def remove_tracked_app(app_name):
     cursor.execute('UPDATE Sessions SET is_active = 0 WHERE app_name = ? AND is_active = 1', (app_name,))
     conn.commit()
 
+@with_db_lock
 def log_usage(app_name, duration_seconds):
     conn = get_connection()
     cursor = conn.cursor()
@@ -221,9 +240,11 @@ def log_usage(app_name, duration_seconds):
         
     conn.commit()
 
+@with_db_lock
 def get_today_usage():
     return get_usage_for_date(datetime.date.today().isoformat())
 
+@with_db_lock
 def get_usage_for_date(date_str):
     conn = get_connection()
     cursor = conn.cursor()
@@ -231,6 +252,7 @@ def get_usage_for_date(date_str):
     data = {row[0]: row[1] for row in cursor.fetchall()}
     return data
 
+@with_db_lock
 def get_usage_history(days=7):
     conn = get_connection()
     cursor = conn.cursor()
@@ -245,6 +267,7 @@ def get_usage_history(days=7):
     data = {row[0]: row[1] for row in cursor.fetchall()}
     return data
 
+@with_db_lock
 def get_app_usage_history(app_name, days=7):
     conn = get_connection()
     cursor = conn.cursor()
@@ -258,6 +281,7 @@ def get_app_usage_history(app_name, days=7):
     data = {row[0]: row[1] for row in cursor.fetchall()}
     return data
 
+@with_db_lock
 def start_session(app_name):
     conn = get_connection()
     cursor = conn.cursor()
@@ -268,6 +292,7 @@ def start_session(app_name):
     cursor.execute('INSERT INTO Sessions (app_name, start_date, duration_seconds, is_active) VALUES (?, ?, 0, 1)', (app_name, now))
     conn.commit()
 
+@with_db_lock
 def update_session(app_name, duration_seconds):
     conn = get_connection()
     cursor = conn.cursor()
@@ -279,6 +304,7 @@ def update_session(app_name, duration_seconds):
         cursor.execute('UPDATE Sessions SET duration_seconds = ? WHERE id = ?', (new_duration, row[0]))
     conn.commit()
 
+@with_db_lock
 def end_session(app_name):
     conn = get_connection()
     cursor = conn.cursor()
@@ -286,6 +312,7 @@ def end_session(app_name):
     cursor.execute('UPDATE Sessions SET is_active = 0 WHERE app_name = ? AND is_active = 1', (app_name,))
     conn.commit()
 
+@with_db_lock
 def get_active_sessions():
     conn = get_connection()
     cursor = conn.cursor()
@@ -293,6 +320,7 @@ def get_active_sessions():
     data = {row[0]: row[1] for row in cursor.fetchall()}
     return data
 
+@with_db_lock
 def get_sessions_for_date(date_str):
     conn = get_connection()
     cursor = conn.cursor()
@@ -307,6 +335,7 @@ def get_sessions_for_date(date_str):
     data = [{'app': row[0], 'start': row[1], 'duration': row[2]} for row in cursor.fetchall()]
     return data
 
+@with_db_lock
 def log_device_activity(duration_seconds):
     conn = get_connection()
     cursor = conn.cursor()
@@ -318,9 +347,11 @@ def log_device_activity(duration_seconds):
     ''', (today, duration_seconds))
     conn.commit()
 
+@with_db_lock
 def get_today_device_activity():
     return get_device_activity_for_date(datetime.date.today().isoformat())
 
+@with_db_lock
 def get_device_activity_for_date(date_str):
     conn = get_connection()
     cursor = conn.cursor()
@@ -328,6 +359,7 @@ def get_device_activity_for_date(date_str):
     row = cursor.fetchone()
     return row[0] if row else 0
 
+@with_db_lock
 def get_device_activity_history(days=7):
     conn = get_connection()
     cursor = conn.cursor()
@@ -341,6 +373,7 @@ def get_device_activity_history(days=7):
     data = {row[0]: row[1] for row in cursor.fetchall()}
     return data
 
+@with_db_lock
 def get_sessions_range(start_date, end_date):
     """Returns all session records between two dates (inclusive)."""
     conn = get_connection()
@@ -354,6 +387,7 @@ def get_sessions_range(start_date, end_date):
     data = [{'app': row[0], 'start': row[1], 'duration': row[2]} for row in cursor.fetchall()]
     return data
 
+@with_db_lock
 def get_usage_range(start_date, end_date):
     """Returns daily usage summaries per app between two dates (inclusive)."""
     conn = get_connection()
