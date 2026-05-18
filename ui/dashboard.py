@@ -3,13 +3,13 @@ from PySide6.QtWidgets import (
     QPushButton, QStackedWidget, QListWidget, QListWidgetItem, QFileIconProvider, QStyle,
     QFrame, QGridLayout, QScrollArea, QGroupBox, QGraphicsDropShadowEffect, QGraphicsColorizeEffect,
     QGraphicsOpacityEffect, QApplication, QAbstractItemView, QLineEdit, QCalendarWidget, QMenu, QWidgetAction,
-    QSpinBox, QProgressBar, QDialog, QFileDialog, QComboBox, QDateEdit
+    QSpinBox, QProgressBar, QDialog, QFileDialog, QComboBox, QDateEdit, QSizePolicy
 )
 import csv
 import json
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtCore import Qt, QTimer, QFileInfo, Signal, QSize, QPropertyAnimation, QEasingCurve, QRect, QDateTime, QDate, QMargins, QBuffer, QIODevice
-from PySide6.QtGui import QPainter, QColor, QFont, QIcon, QPixmap, QBrush, QPainterPath, QLinearGradient, QPen, QTextDocument, QPageLayout
+from PySide6.QtGui import QPainter, QColor, QFont, QIcon, QPixmap, QBrush, QPainterPath, QLinearGradient, QPen, QTextDocument, QPageLayout, QFontMetrics
 from PySide6.QtCharts import (
     QChart, QChartView, QPieSeries, QBarSeries, QStackedBarSeries, QBarSet, 
     QBarCategoryAxis, QValueAxis, QLineSeries, QDateTimeAxis
@@ -50,6 +50,27 @@ SYSTEM_PROCESS_BLOCKLIST = {
     'ibmpmsvc.exe', 'lsess.exe', 'mousocoreworker.exe', 'onenotem.exe', 'scvhost.exe',
     'spoolsv.exe', 'smartscreen.exe', 'unsecapp.exe', 'wudfhost.exe'
 }
+
+class ElidedLabel(QLabel):
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self._full_text = text
+        self.setToolTip(text)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.setMinimumWidth(10)
+
+    def setText(self, text):
+        self._full_text = text
+        self.setToolTip(text)
+        super().setText(self._elided_text(text, self.width()))
+
+    def _elided_text(self, text, width):
+        metrics = QFontMetrics(self.font())
+        return metrics.elidedText(text, Qt.ElideRight, width - 2)
+
+    def resizeEvent(self, event):
+        super().setText(self._elided_text(self._full_text, event.size().width()))
+        super().resizeEvent(event)
 
 class SmoothScrollList(QListWidget):
     def __init__(self, parent=None):
@@ -480,7 +501,7 @@ class SummaryCard(QFrame):
         sep.setStyleSheet("background-color: rgba(255,255,255,8); border: none; margin: 6px 0px;")
         layout.addWidget(sep)
 
-        self.value_label = QLabel(value)
+        self.value_label = ElidedLabel(value)
         self.value_label.setStyleSheet(
             "color: #F1F5F9; font-size: 28px; font-weight: bold; background: transparent;"
         )
@@ -643,7 +664,7 @@ class AppListItemWidget(QWidget):
         layout.addWidget(self.icon_label)
         
         # Name
-        self.name_label = QLabel(display_name)
+        self.name_label = ElidedLabel(display_name)
         self.name_label.setStyleSheet("color: white; font-weight: 600; font-size: 14px;")
         layout.addWidget(self.name_label)
         
@@ -705,7 +726,7 @@ class TrackedAppItemWidget(QWidget):
         name_col = QVBoxLayout()
         name_col.setSpacing(0)
         
-        self.name_label = QLabel(friendly_name)
+        self.name_label = ElidedLabel(friendly_name)
         self.name_label.setStyleSheet("color: white; font-weight: bold; font-size: 14px; background: transparent;")
         name_col.addWidget(self.name_label)
         
@@ -1472,7 +1493,10 @@ class TimelineWidget(QWidget):
             font.setPointSize(9)
             painter.setFont(font)
             display_name = app[:-4].title() if app.lower().endswith('.exe') else app.title()
-            painter.drawText(15, int(y + row_h/2 + 5), display_name)
+            
+            metrics = QFontMetrics(font)
+            elided_name = metrics.elidedText(display_name, Qt.ElideRight, left_margin - 20)
+            painter.drawText(15, int(y + row_h/2 + 5), elided_name)
 
 class ExportDialog(QDialog):
     def __init__(self, parent=None):
