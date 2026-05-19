@@ -100,9 +100,22 @@ class AppController(QObject):
                 background-color: #1e1e2e;
                 color: #cdd6f4;
                 border: 1px solid #45475a;
+                padding: 4px 0px;
+            }
+            QMenu::item {
+                background-color: transparent;
+                padding: 6px 32px 6px 20px;
+                margin: 2px 4px;
+                border-radius: 4px;
             }
             QMenu::item:selected {
                 background-color: #313244;
+                color: #f5e0dc;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #45475a;
+                margin: 4px 0px;
             }
         """)
         
