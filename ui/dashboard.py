@@ -1268,7 +1268,7 @@ class SettingCard(QFrame):
     def __init__(self, title, description, icon_path=None, parent=None):
         super().__init__(parent)
         self.setObjectName("SettingCard")
-        self.setMinimumHeight(130)
+        self.setMinimumHeight(155)
         
         # Glassmorphic styling
         self.setStyleSheet("""
@@ -1281,12 +1281,12 @@ class SettingCard(QFrame):
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 18, 20, 18)
-        layout.setSpacing(12)
+        layout.setContentsMargins(18, 15, 18, 15)
+        layout.setSpacing(8)
 
         # Header Row
         header = QHBoxLayout()
-        header.setSpacing(12)
+        header.setSpacing(10)
         
         if icon_path and os.path.exists(icon_path):
             self.icon_label = QLabel()
@@ -1315,7 +1315,7 @@ class SettingCard(QFrame):
         # Description
         self.desc_label = QLabel(description)
         self.desc_label.setWordWrap(True)
-        self.desc_label.setStyleSheet("color: #94A3B8; font-size: 12px; background: transparent; line-height: 1.5; margin-top: 5px;")
+        self.desc_label.setStyleSheet("color: #94A3B8; font-size: 12px; background: transparent; line-height: 1.4; margin-top: 2px;")
         layout.addWidget(self.desc_label)
         layout.addStretch()
 
@@ -1400,23 +1400,26 @@ class GeneralSettingsView(QWidget):
         header_layout.addWidget(self.btn_reset)
         layout.addLayout(header_layout)
         
-        # Scrollable Grid of Cards
+        # Scrollable content area — everything goes inside here
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("background: transparent; border: none;")
         
         container = QWidget()
         container.setStyleSheet("background: transparent;")
-        grid_layout = QGridLayout(container)
-        grid_layout.setContentsMargins(0, 5, 0, 10)
-        grid_layout.setSpacing(20)
+        content_layout = QVBoxLayout(container)
+        content_layout.setContentsMargins(0, 5, 0, 10)
+        content_layout.setSpacing(15)
         
         icons_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "icons")
         
         # Section: Engine
         engine_header = QLabel("Tracking Engine")
         engine_header.setStyleSheet("color: #6366F1; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; margin-top: 10px;")
-        grid_layout.addWidget(engine_header, 0, 0, 1, 2)
+        content_layout.addWidget(engine_header)
+
+        engine_row = QHBoxLayout()
+        engine_row.setSpacing(20)
 
         # Poll Interval Card
         self.card_poll = SettingCard(
@@ -1427,7 +1430,7 @@ class GeneralSettingsView(QWidget):
         self.in_poll = ModernSpinBox(1, 60, " s")
         self.in_poll.setValue(int(self.config.get("poll_interval")))
         self.card_poll.set_input_widget(self.in_poll)
-        grid_layout.addWidget(self.card_poll, 1, 0)
+        engine_row.addWidget(self.card_poll)
 
         # Scan Interval Card
         self.card_scan = SettingCard(
@@ -1438,12 +1441,16 @@ class GeneralSettingsView(QWidget):
         self.in_scan = ModernSpinBox(5, 300, " s")
         self.in_scan.setValue(int(self.config.get("scan_interval")))
         self.card_scan.set_input_widget(self.in_scan)
-        grid_layout.addWidget(self.card_scan, 1, 1)
+        engine_row.addWidget(self.card_scan)
+        content_layout.addLayout(engine_row)
 
         # Section: Maintenance
         maintenance_header = QLabel("Maintenance & Retention")
-        maintenance_header.setStyleSheet("color: #6366F1; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; margin-top: 25px;")
-        grid_layout.addWidget(maintenance_header, 2, 0, 1, 2)
+        maintenance_header.setStyleSheet("color: #6366F1; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; margin-top: 15px;")
+        content_layout.addWidget(maintenance_header)
+
+        maintenance_row = QHBoxLayout()
+        maintenance_row.setSpacing(20)
 
         # Idle Threshold Card
         self.card_idle = SettingCard(
@@ -1454,7 +1461,7 @@ class GeneralSettingsView(QWidget):
         self.in_idle = ModernSpinBox(10, 3600, " s")
         self.in_idle.setValue(int(self.config.get("idle_threshold")))
         self.card_idle.set_input_widget(self.in_idle)
-        grid_layout.addWidget(self.card_idle, 3, 0)
+        maintenance_row.addWidget(self.card_idle)
 
         # Data Retention Card
         self.card_retention = SettingCard(
@@ -1465,16 +1472,13 @@ class GeneralSettingsView(QWidget):
         self.in_retention = ModernSpinBox(1, 3650, " days")
         self.in_retention.setValue(int(self.config.get("data_retention_days")))
         self.card_retention.set_input_widget(self.in_retention)
-        grid_layout.addWidget(self.card_retention, 3, 1)
+        maintenance_row.addWidget(self.card_retention)
+        content_layout.addLayout(maintenance_row)
 
-        grid_layout.setRowStretch(4, 1)
-        scroll.setWidget(container)
-        layout.addWidget(scroll)
-
-        # ── Danger Zone ────────────────────────────────────────────────
+        # ── Danger Zone (inside scroll area) ──────────────────────────
         danger_header = QLabel("Danger Zone")
-        danger_header.setStyleSheet("color: #EF4444; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; margin-top: 5px;")
-        layout.addWidget(danger_header)
+        danger_header.setStyleSheet("color: #EF4444; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; margin-top: 20px;")
+        content_layout.addWidget(danger_header)
 
         danger_row = QHBoxLayout()
         danger_desc = QLabel("Permanently delete all tracked apps, usage logs, sessions, and device activity data.")
@@ -1503,9 +1507,10 @@ class GeneralSettingsView(QWidget):
         """)
         self.btn_clear_data.clicked.connect(self.confirm_clear_all_data)
         danger_row.addWidget(self.btn_clear_data)
-        layout.addLayout(danger_row)
+        content_layout.addLayout(danger_row)
 
-        # Save Action
+        # Save Action (inside scroll area)
+        content_layout.addSpacing(10)
         save_container = QHBoxLayout()
         save_container.addStretch()
         
@@ -1533,8 +1538,12 @@ class GeneralSettingsView(QWidget):
         """)
         self.btn_save.clicked.connect(self.save_settings)
         save_container.addWidget(self.btn_save)
-        save_container.addStretch() # Center it!
-        layout.addLayout(save_container)
+        save_container.addStretch()
+        content_layout.addLayout(save_container)
+
+        content_layout.addStretch()
+        scroll.setWidget(container)
+        layout.addWidget(scroll)
 
     def save_settings(self):
         try:
