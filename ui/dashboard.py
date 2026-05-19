@@ -2350,10 +2350,11 @@ class DashboardWindow(QWidget):
     def center_on_screen(self):
         # use availableGeometry to exclude taskbar area
         screen = QApplication.primaryScreen().availableGeometry()
-        size = self.geometry()
-        x = (screen.width() - size.width()) // 2
-        y = (screen.height() - size.height()) // 2
-        self.move(screen.left() + x, screen.top() + y)
+        win_w = self.width()
+        win_h = self.height()
+        x = screen.left() + (screen.width() - win_w) // 2
+        y = screen.top() + max(10, (screen.height() - win_h) // 2)
+        self.move(x, y)
         
         self.setStyleSheet("""
             QMainWindow, QWidget#MainContainer {

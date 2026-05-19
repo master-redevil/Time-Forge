@@ -8,6 +8,7 @@ from PySide6.QtCore import QObject, Signal, Slot, Qt, QAbstractNativeEventFilter
 import database
 from tracker import TrackerDaemon
 from ui.dashboard import DashboardWindow
+from ui.splash import SplashScreen
 from config import config
 from updater import UpdateChecker
 
@@ -163,9 +164,15 @@ class AppController(QObject):
         if self.dashboard_window.isVisible():
             self.dashboard_window.hide()
         else:
-            self.dashboard_window.show()
-            self.dashboard_window.refresh(force=True)
-            self.dashboard_window.activateWindow()
+            # Show splash screen before opening the dashboard
+            self._splash = SplashScreen()
+            self._splash.start(self._show_dashboard_after_splash)
+
+    def _show_dashboard_after_splash(self):
+        self.dashboard_window.show()
+        self.dashboard_window.refresh(force=True)
+        self.dashboard_window.activateWindow()
+        self._splash = None  # Release reference
 
     def quit_app(self):
         # P1.4: Properly unregister hotkey to release system resource
