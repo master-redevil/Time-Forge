@@ -24,5 +24,8 @@ Name: "{group}\Time Forge"; Filename: "{app}\TimeForge.exe"
 Name: "{group}\{cm:UninstallProgram,Time Forge}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Time Forge"; Filename: "{app}\TimeForge.exe"; Tasks: desktopicon
 
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "TimeForge"; ValueData: """{app}\TimeForge.exe"""; Flags: uninsdeletevalue
+
 [Run]
 Filename: "{app}\TimeForge.exe"; Description: "{cm:LaunchProgram,Time Forge}"; Flags: nowait postinstall skipifsilent

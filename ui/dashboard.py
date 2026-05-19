@@ -529,6 +529,166 @@ class SummaryCard(QFrame):
         self._glow_anim.start()
         super().leaveEvent(event)
 
+class WelcomeView(QWidget):
+    """Landing page shown when no apps are tracked yet (new user / fresh install)."""
+    navigate_to_manage = Signal()
+
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(40, 20, 40, 30)
+        layout.setSpacing(0)
+        layout.addStretch(2)
+
+        # ── Logo ───────────────────────────────────────────────────────
+        logo_container = QHBoxLayout()
+        logo_container.setAlignment(Qt.AlignCenter)
+
+        logo_label = QLabel()
+        logo_label.setAlignment(Qt.AlignCenter)
+        logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "logo.png")
+        if os.path.exists(logo_path):
+            pixmap = QPixmap(logo_path).scaled(100, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            logo_label.setPixmap(pixmap)
+        logo_label.setStyleSheet("background: transparent;")
+
+        glow = QGraphicsDropShadowEffect()
+        glow.setBlurRadius(35)
+        glow.setColor(QColor("#6366F1"))
+        glow.setOffset(0, 0)
+        logo_label.setGraphicsEffect(glow)
+
+        logo_container.addWidget(logo_label)
+        layout.addLayout(logo_container)
+        layout.addSpacing(20)
+
+        # ── Title ──────────────────────────────────────────────────────
+        title = QLabel("Welcome to Time Forge")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("""
+            color: #F1F5F9;
+            font-size: 28px;
+            font-weight: 900;
+            letter-spacing: 1px;
+            background: transparent;
+        """)
+        layout.addWidget(title)
+        layout.addSpacing(8)
+
+        subtitle = QLabel("Track your productivity. Understand your habits. Own your time.")
+        subtitle.setAlignment(Qt.AlignCenter)
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet("""
+            color: #64748B;
+            font-size: 14px;
+            font-weight: 500;
+            background: transparent;
+        """)
+        layout.addWidget(subtitle)
+        layout.addSpacing(35)
+
+        # ── Step Cards ─────────────────────────────────────────────────
+        steps_layout = QHBoxLayout()
+        steps_layout.setSpacing(18)
+
+        steps = [
+            ("1", "Add Apps", "Head to App Management and\ntoggle the apps you want to track.", "#6366F1", "#1E1B4B"),
+            ("2", "Use Your PC", "Time Forge runs silently in\nyour system tray, logging focus time.", "#3B82F6", "#172554"),
+            ("3", "Review Insights", "Check Analytics for charts,\ntrends, and exportable reports.", "#8B5CF6", "#2E1065"),
+        ]
+
+        for i, (num, heading, desc, accent, bg_dark) in enumerate(steps):
+            card = QFrame()
+            card.setObjectName(f"StepCard{i}")
+            card.setFixedHeight(160)
+            card.setStyleSheet(f"""
+                QFrame#{f"StepCard{i}"} {{
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                        stop:0 {bg_dark}, stop:1 #0F1117);
+                    border: 1px solid rgba(99, 102, 241, 0.08);
+                    border-radius: 14px;
+                }}
+                QFrame#{f"StepCard{i}"}:hover {{
+                    border-color: rgba({int(accent[1:3],16)}, {int(accent[3:5],16)}, {int(accent[5:7],16)}, 0.4);
+                }}
+                QFrame#{f"StepCard{i}"} QLabel {{
+                    background: transparent;
+                    border: none;
+                }}
+            """)
+
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(20, 18, 20, 18)
+            card_layout.setSpacing(8)
+
+            # Step number badge
+            badge = QLabel(num)
+            badge.setFixedSize(28, 28)
+            badge.setAlignment(Qt.AlignCenter)
+            badge.setStyleSheet(f"""
+                background-color: {accent};
+                color: white;
+                font-size: 13px;
+                font-weight: 900;
+                border-radius: 14px;
+                border: none;
+            """)
+            card_layout.addWidget(badge)
+
+            step_title = QLabel(heading)
+            step_title.setStyleSheet(f"color: {accent}; font-size: 15px; font-weight: 800; background: transparent; border: none;")
+            card_layout.addWidget(step_title)
+
+            step_desc = QLabel(desc)
+            step_desc.setStyleSheet("color: #94A3B8; font-size: 11px; background: transparent; border: none;")
+            step_desc.setWordWrap(True)
+            card_layout.addWidget(step_desc)
+
+            card_layout.addStretch()
+            steps_layout.addWidget(card)
+
+        layout.addLayout(steps_layout)
+        layout.addSpacing(35)
+
+        # ── CTA Button ─────────────────────────────────────────────────
+        btn_row = QHBoxLayout()
+        btn_row.setAlignment(Qt.AlignCenter)
+
+        self.btn_get_started = QPushButton("Get Started  →")
+        self.btn_get_started.setFixedSize(220, 48)
+        self.btn_get_started.setCursor(Qt.PointingHandCursor)
+        self.btn_get_started.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #6366F1, stop:1 #8B5CF6);
+                color: white;
+                border: none;
+                border-radius: 12px;
+                font-weight: 900;
+                font-size: 15px;
+                letter-spacing: 0.5px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #4F46E5, stop:1 #7C3AED);
+            }
+            QPushButton:pressed {
+                background: #4338CA;
+            }
+        """)
+        self.btn_get_started.clicked.connect(self.navigate_to_manage.emit)
+
+        btn_row.addWidget(self.btn_get_started)
+        layout.addLayout(btn_row)
+        layout.addStretch(3)
+
+        # ── Keyboard hint ──────────────────────────────────────────────
+        hint = QLabel("Tip: Press Ctrl+Shift+T anytime to toggle the dashboard")
+        hint.setAlignment(Qt.AlignCenter)
+        hint.setStyleSheet("color: #334155; font-size: 11px; background: transparent;")
+        layout.addWidget(hint)
+
+
 class SummaryView(QWidget):
     def __init__(self):
         super().__init__()
@@ -574,6 +734,7 @@ class SummaryView(QWidget):
         self.recent_list = SmoothScrollList()
         self.recent_list.setObjectName("RecentList")
         layout.addWidget(self.recent_list, 1) # Give it stretch
+
 
 class ToggleSwitch(QWidget):
     toggled = Signal(bool)
@@ -2695,6 +2856,7 @@ class DashboardWindow(QWidget):
         # Stacked Widget
         self.stacked_widget = QStackedWidget()
         
+        self.welcome_view = WelcomeView()
         self.summary_view = SummaryView()
         self.stats_view = AnalyticsView()
         self.apps_view = TrackedAppsView()
@@ -2704,34 +2866,43 @@ class DashboardWindow(QWidget):
         
         self.settings_view = GeneralSettingsView()
 
-        self.stacked_widget.addWidget(self.summary_view)
-        self.stacked_widget.addWidget(self.stats_view)
-        self.stacked_widget.addWidget(self.apps_view)
-        self.stacked_widget.addWidget(self.manage_view)
-        self.stacked_widget.addWidget(self.settings_view)
+        # Index 0: Welcome, 1: Summary, 2: Analytics, 3: Tracked Apps, 4: App Management, 5: Settings
+        self.stacked_widget.addWidget(self.welcome_view)   # 0
+        self.stacked_widget.addWidget(self.summary_view)    # 1
+        self.stacked_widget.addWidget(self.stats_view)      # 2
+        self.stacked_widget.addWidget(self.apps_view)       # 3
+        self.stacked_widget.addWidget(self.manage_view)     # 4
+        self.stacked_widget.addWidget(self.settings_view)   # 5
 
         self.content_layout.addWidget(self.stacked_widget)
         container_layout.addWidget(content_widget)
         
         main_layout.addWidget(self.container)
 
-        # Connect Sidebar Buttons
-        self.sidebar.btn_home.clicked.connect(lambda: self.switch_view(0))
-        self.sidebar.btn_stats.clicked.connect(lambda: self.switch_view(1))
-        self.sidebar.btn_apps.clicked.connect(lambda: self.switch_view(2))
-        self.sidebar.btn_manage.clicked.connect(lambda: self.switch_view(3))
-        self.sidebar.btn_settings.clicked.connect(lambda: self.switch_view(4))
+        # Connect Sidebar Buttons (indices offset by 1 due to WelcomeView at 0)
+        self.sidebar.btn_home.clicked.connect(lambda: self.switch_view(1))
+        self.sidebar.btn_stats.clicked.connect(lambda: self.switch_view(2))
+        self.sidebar.btn_apps.clicked.connect(lambda: self.switch_view(3))
+        self.sidebar.btn_manage.clicked.connect(lambda: self.switch_view(4))
+        self.sidebar.btn_settings.clicked.connect(lambda: self.switch_view(5))
         
-        # Initial View
-        self.switch_view(0)
+        # Welcome view "Get Started" navigates to App Management
+        self.welcome_view.navigate_to_manage.connect(lambda: self.switch_view(4))
+        
+        # Initial View — will be overridden by load_data if no tracked apps
+        self.switch_view(1)
 
 
     def switch_view(self, index):
         self.stacked_widget.setCurrentIndex(index)
-        self.sidebar.set_active_button(index)
-        if index == 1:
+        # Map stacked widget index to sidebar button index (0=welcome has no button)
+        # Sidebar: 0=Dashboard, 1=Analytics, 2=Tracked Apps, 3=App Management, 4=Settings
+        # Stacked: 0=Welcome, 1=Summary, 2=Analytics, 3=Tracked Apps, 4=App Management, 5=Settings
+        sidebar_index = index - 1 if index >= 1 else 0
+        self.sidebar.set_active_button(sidebar_index)
+        if index == 2:
             self.stats_view.refresh_data()
-        elif index == 3:
+        elif index == 4:
             self.manage_view.load_tracked_apps()
             self.manage_view.search_input.setFocus()
         self.load_data()
@@ -2752,6 +2923,21 @@ class DashboardWindow(QWidget):
     def load_data(self):
         data = database.get_today_usage()
         tracked_set = set(database.get_tracked_apps())
+
+        # Auto-switch between Welcome and Summary views
+        current_idx = self.stacked_widget.currentIndex()
+        if not tracked_set:
+            # No tracked apps — show welcome if user is on summary (or initial load)
+            if current_idx == 1:
+                self.stacked_widget.setCurrentIndex(0)
+                self.sidebar.set_active_button(0)
+            return  # Nothing else to update
+        else:
+            # Has tracked apps — if still on welcome, switch to summary
+            if current_idx == 0:
+                self.stacked_widget.setCurrentIndex(1)
+                self.sidebar.set_active_button(0)
+
         filtered_data = {k: v for k, v in data.items() if k in tracked_set}
         app_paths = database.get_app_paths()
         icon_provider = QFileIconProvider()
@@ -2806,7 +2992,7 @@ class DashboardWindow(QWidget):
         self.apps_view.update_apps(cleaned_data, active_sessions, focused, app_paths)
         
         # If stats view is visible, refresh it too
-        if self.stacked_widget.currentIndex() == 1:
+        if self.stacked_widget.currentIndex() == 2:
             self.stats_view.refresh_data()
 
 
