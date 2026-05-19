@@ -1122,12 +1122,22 @@ class AppManagementView(QWidget):
     def load_all_apps(self):
         # Get running processes
         running = {} # name -> exe
+        # Exclude Time Forge's own process from the list
+        own_pid = os.getpid()
+        self_names = {'timeforge.exe'}
+        try:
+            self_names.add(psutil.Process(own_pid).name().lower())
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+        
         for proc in psutil.process_iter(['name', 'exe']):
             try:
                 name = proc.info.get('name')
                 exe = proc.info.get('exe')
                 if name:
                     name_lower = name.lower()
+                    if name_lower in self_names:
+                        continue
                     if exe and name_lower not in running:
                         running[name_lower] = exe
                     elif name_lower not in running:
