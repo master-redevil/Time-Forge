@@ -2,6 +2,9 @@ import os
 import json
 import logging
 
+APP_VERSION = "1.0.0"
+GITHUB_REPO = "master-redevil/Time-Forge"
+
 logger = logging.getLogger("TimeForge.Config")
 
 class Config:

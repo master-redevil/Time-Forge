@@ -1,14 +1,15 @@
 import sys
 import ctypes
 from ctypes import wintypes
-from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
-from PySide6.QtGui import QIcon, QPixmap, QColor, QPainter, QFont
-from PySide6.QtCore import QObject, Signal, Slot, Qt, QAbstractNativeEventFilter
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QMessageBox
+from PySide6.QtGui import QIcon, QPixmap, QColor, QPainter, QFont, QDesktopServices
+from PySide6.QtCore import QObject, Signal, Slot, Qt, QAbstractNativeEventFilter, QUrl
 
 import database
 from tracker import TrackerDaemon
 from ui.dashboard import DashboardWindow
 from config import config
+from updater import UpdateChecker
 
 # Setup logging
 import logging
@@ -65,6 +66,11 @@ class AppController(QObject):
         self.tracker.idle_status_changed.connect(self.dashboard_window.update_idle_status)
         self.tracker.error_occurred.connect(self.handle_tracker_error)
         self.tracker.start()
+
+        # Check for updates
+        self.update_checker = UpdateChecker()
+        self.update_checker.update_available.connect(self.show_update_dialog)
+        self.update_checker.start()
 
         self.setup_tray()
         
@@ -139,6 +145,18 @@ class AppController(QObject):
     def handle_tracker_error(self, message):
         logger.error(f"Tracker reported error: {message}")
         self.dashboard_window.show_tracker_error(message)
+
+    @Slot(str, str)
+    def show_update_dialog(self, version, url):
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Information)
+        msg.setWindowTitle("Update Available")
+        msg.setText(f"A new version of Time Forge (v{version}) is available.")
+        msg.setInformativeText("Would you like to download it now?")
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        
+        if msg.exec() == QMessageBox.Yes:
+            QDesktopServices.openUrl(QUrl(url))
 
     @Slot()
     def toggle_dashboard(self):
