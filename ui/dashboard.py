@@ -1299,7 +1299,41 @@ class GeneralSettingsView(QWidget):
         grid_layout.setRowStretch(4, 1)
         scroll.setWidget(container)
         layout.addWidget(scroll)
-        
+
+        # ── Danger Zone ────────────────────────────────────────────────
+        danger_header = QLabel("Danger Zone")
+        danger_header.setStyleSheet("color: #EF4444; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; margin-top: 5px;")
+        layout.addWidget(danger_header)
+
+        danger_row = QHBoxLayout()
+        danger_desc = QLabel("Permanently delete all tracked apps, usage logs, sessions, and device activity data.")
+        danger_desc.setStyleSheet("color: #94A3B8; font-size: 12px;")
+        danger_desc.setWordWrap(True)
+        danger_row.addWidget(danger_desc, 1)
+
+        self.btn_clear_data = QPushButton("Clear All Data")
+        self.btn_clear_data.setFixedSize(180, 40)
+        self.btn_clear_data.setCursor(Qt.PointingHandCursor)
+        self.btn_clear_data.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #EF4444;
+                border: 1px solid #EF4444;
+                border-radius: 10px;
+                font-weight: 800;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: rgba(239, 68, 68, 0.1);
+            }
+            QPushButton:pressed {
+                background-color: rgba(239, 68, 68, 0.2);
+            }
+        """)
+        self.btn_clear_data.clicked.connect(self.confirm_clear_all_data)
+        danger_row.addWidget(self.btn_clear_data)
+        layout.addLayout(danger_row)
+
         # Save Action
         save_container = QHBoxLayout()
         save_container.addStretch()
@@ -1381,6 +1415,156 @@ class GeneralSettingsView(QWidget):
         # Flash the button to show something happened
         self.btn_reset.setText("Defaults Restored!")
         QTimer.singleShot(1500, lambda: self.btn_reset.setText("Reset to Defaults"))
+
+    def confirm_clear_all_data(self):
+        """Show a themed confirmation dialog that requires typing DELETE to proceed."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Confirm Data Deletion")
+        dialog.setFixedSize(420, 260)
+        dialog.setWindowFlags(dialog.windowFlags() | Qt.FramelessWindowHint)
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #0F1117;
+                border: 1px solid #EF4444;
+                border-radius: 16px;
+            }
+        """)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(28, 24, 28, 20)
+        layout.setSpacing(14)
+
+        # Warning icon + title
+        title = QLabel("⚠  Clear All Data")
+        title.setStyleSheet("color: #EF4444; font-size: 18px; font-weight: 900;")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        desc = QLabel(
+            "This will permanently delete all data including tracked apps, "
+            "usage logs, sessions, and device activity. This cannot be undone.\n\n"
+            "Type DELETE below to confirm:"
+        )
+        desc.setStyleSheet("color: #94A3B8; font-size: 12px;")
+        desc.setWordWrap(True)
+        desc.setAlignment(Qt.AlignCenter)
+        layout.addWidget(desc)
+
+        confirm_input = QLineEdit()
+        confirm_input.setPlaceholderText("Type DELETE to confirm")
+        confirm_input.setAlignment(Qt.AlignCenter)
+        confirm_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #1E2430;
+                color: #F1F5F9;
+                border: 1px solid #2D3748;
+                border-radius: 8px;
+                padding: 8px 12px;
+                font-size: 14px;
+                font-weight: 600;
+                letter-spacing: 2px;
+            }
+            QLineEdit:focus {
+                border-color: #EF4444;
+            }
+        """)
+        layout.addWidget(confirm_input)
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(12)
+
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setCursor(Qt.PointingHandCursor)
+        btn_cancel.setFixedHeight(38)
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background-color: #1E2430;
+                color: #CDD6F4;
+                border: 1px solid #2D3748;
+                border-radius: 8px;
+                padding: 0 24px;
+                font-weight: 700;
+            }
+            QPushButton:hover {
+                background-color: #2D3748;
+            }
+        """)
+        btn_cancel.clicked.connect(dialog.reject)
+        btn_row.addWidget(btn_cancel)
+
+        btn_confirm = QPushButton("Delete Everything")
+        btn_confirm.setCursor(Qt.PointingHandCursor)
+        btn_confirm.setFixedHeight(38)
+        btn_confirm.setEnabled(False)
+        btn_confirm.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(239, 68, 68, 0.15);
+                color: #EF4444;
+                border: 1px solid #EF4444;
+                border-radius: 8px;
+                padding: 0 24px;
+                font-weight: 800;
+            }
+            QPushButton:hover {
+                background-color: rgba(239, 68, 68, 0.25);
+            }
+            QPushButton:disabled {
+                background-color: #1E2430;
+                color: #4A5568;
+                border-color: #2D3748;
+            }
+        """)
+        btn_row.addWidget(btn_confirm)
+        layout.addLayout(btn_row)
+
+        # Enable confirm button only when user types DELETE
+        def on_text_changed(text):
+            btn_confirm.setEnabled(text.strip() == "DELETE")
+        confirm_input.textChanged.connect(on_text_changed)
+
+        def on_confirm():
+            if confirm_input.text().strip() == "DELETE":
+                success = database.clear_all_data()
+                dialog.accept()
+                if success:
+                    self.btn_clear_data.setText("✓ Data Cleared")
+                    self.btn_clear_data.setStyleSheet("""
+                        QPushButton {
+                            background-color: rgba(16, 185, 129, 0.1);
+                            color: #10B981;
+                            border: 1px solid #10B981;
+                            border-radius: 10px;
+                            font-weight: 800;
+                            font-size: 13px;
+                        }
+                    """)
+                    QTimer.singleShot(2000, self._reset_clear_button)
+                else:
+                    self.btn_clear_data.setText("✗ Error")
+                    QTimer.singleShot(2000, self._reset_clear_button)
+
+        btn_confirm.clicked.connect(on_confirm)
+        dialog.exec()
+
+    def _reset_clear_button(self):
+        self.btn_clear_data.setText("Clear All Data")
+        self.btn_clear_data.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #EF4444;
+                border: 1px solid #EF4444;
+                border-radius: 10px;
+                font-weight: 800;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: rgba(239, 68, 68, 0.1);
+            }
+            QPushButton:pressed {
+                background-color: rgba(239, 68, 68, 0.2);
+            }
+        """)
 
 class TimelineWidget(QWidget):
     def __init__(self, parent=None):

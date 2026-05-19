@@ -460,6 +460,24 @@ def get_sessions_range(start_date, end_date):
     return data
 
 @with_db_lock
+def clear_all_data():
+    """Deletes ALL data: usage logs, sessions, device activity, and tracked apps. Only preserves schema."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('DELETE FROM UsageLogs')
+        cursor.execute('DELETE FROM Sessions')
+        cursor.execute('DELETE FROM DeviceActivity')
+        cursor.execute('DELETE FROM TrackedApps')
+        conn.commit()
+        cursor.execute('VACUUM')
+        return True
+    except Exception as e:
+        import logging
+        logging.getLogger("TimeForge.Database").error(f"Clear all data failed: {e}")
+        return False
+
+@with_db_lock
 def get_usage_range(start_date, end_date):
     """Returns daily usage summaries per app between two dates (inclusive)."""
     conn = get_connection()
